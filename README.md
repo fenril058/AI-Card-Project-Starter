@@ -116,6 +116,21 @@ uv run python cardgen.py --profile zimage generate `
 
 標準Z-Imageワークフローのnegative経路は `ConditioningZeroOut` です。独立したネガティブプロンプトは適用されないため、除外条件はポジティブプロンプトへ自然文で含めます。
 
+### FLUX.2 Kleinで参照編集
+
+入力画像を所有・管理する別プロジェクト内の絶対パスを明示します。この公開スターターには
+入力画像を保管しません。
+
+```powershell
+uv run python cardgen.py --profile flux2-klein-edit generate `
+  --prompt "Refine the supplied illustration while preserving its composition" `
+  --input-image "C:\path\to\private-project\references\source.png" `
+  --count 1
+```
+
+入力画像はlocalhostのComfyUIへ送信するために読み取るだけで、このリポジトリへのコピーや
+メタデータへの絶対パス記録は行いません。相対パスは受け付けません。
+
 ## 8. Seedと複数生成
 
 固定Seed:

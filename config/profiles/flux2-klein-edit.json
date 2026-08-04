@@ -1,0 +1,27 @@
+{
+  "schema_version": 4,
+  "id": "flux2-klein-edit",
+  "display_name": "FLUX.2 Klein 4B Base (Reference Edit)",
+  "workflow": "workflows/approved/flux2_klein_4b_edit_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "bindings": {
+    "positive_prompt": {"node_id": "74", "field": "text"},
+    "negative_prompt": {"node_id": "67", "field": "text"},
+    "seed": {"node_id": "73", "field": "noise_seed"},
+    "input_image": {"node_id": "82", "field": "image"}
+  },
+  "approved_models": {
+    "checkpoints": [],
+    "unet": ["flux-2-klein-base-4b-fp8.safetensors"],
+    "clip": ["qwen_3_4b.safetensors"],
+    "vae": ["flux2-vae.safetensors"],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "low quality, flat cel shading, thick cartoon outlines, photorealistic, modern clothing, samurai armor, katana, torii gate, shrine, European architecture, cyberpunk armor, readable text, logo, watermark, extra fingers, malformed hands, broken bow, missing bowstring"
+  }
+}
