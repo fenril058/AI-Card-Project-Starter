@@ -1,0 +1,1086 @@
+#!/usr/bin/env python3
+"""Run approved ComfyUI API workflows through named generation profiles.
+
+The project is intentionally standard-library only. Configuration is split into:
+
+- config/app.json: settings shared by every profile
+- config/profiles/<profile>.json: workflow and approved models for one pipeline
+
+Only localhost ComfyUI endpoints and project-local files are accepted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import datetime as dt
+import json
+import re
+import secrets
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
+DEFAULT_APP_CONFIG = PROJECT_DIR / "config" / "app.json"
+PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+APP_CONFIG_SCHEMA_VERSION = 3
+PROFILE_SCHEMA_VERSION = 4
+SAMPLER_TYPES = {"KSampler", "KSamplerAdvanced"}
+LATENT_TYPES = {"EmptyLatentImage", "EmptySD3LatentImage"}
+
+# Sampler inputs that --steps/--cfg/--sampler/--scheduler may overwrite.
+SAMPLER_OVERRIDE_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
+
+# Sampler inputs recorded in run metadata so a result can be traced to settings.
+SAMPLER_RECORD_FIELDS = (
+    "steps",
+    "cfg",
+    "sampler_name",
+    "scheduler",
+    "denoise",
+    "add_noise",
+    "start_at_step",
+    "end_at_step",
+    "return_with_leftover_noise",
+)
+
+# class_type -> input field -> approval category
+MODEL_INPUTS: dict[str, dict[str, str]] = {
+    "CheckpointLoaderSimple": {"ckpt_name": "checkpoints"},
+    "CheckpointLoader": {"ckpt_name": "checkpoints"},
+    "UNETLoader": {"unet_name": "unet"},
+    "CLIPLoader": {"clip_name": "clip"},
+    "DualCLIPLoader": {"clip_name1": "clip", "clip_name2": "clip"},
+    "TripleCLIPLoader": {
+        "clip_name1": "clip",
+        "clip_name2": "clip",
+        "clip_name3": "clip",
+    },
+    "VAELoader": {"vae_name": "vae"},
+    "LoraLoader": {"lora_name": "loras"},
+    "LoraLoaderModelOnly": {"lora_name": "loras"},
+    "UpscaleModelLoader": {"model_name": "upscale_models"},
+}
+
+# Prompt-bearing node types supported by the mutator.
+PROMPT_FIELDS: dict[str, tuple[str, ...]] = {
+    "CLIPTextEncode": ("text",),
+    "CLIPTextEncodeSDXL": ("text_g", "text_l"),
+    "CLIPTextEncodeSDXLRefiner": ("text",),
+}
+
+
+class CardGenError(RuntimeError):
+    """Expected user-facing error."""
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            value = json.load(handle)
+    except FileNotFoundError as exc:
+        raise CardGenError(f"ファイルがありません: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise CardGenError(f"JSONが不正です: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise CardGenError(f"JSONの最上位はオブジェクトである必要があります: {path}")
+    return value
+
+
+def resolve_project_path(raw_path: str | Path) -> Path:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = PROJECT_DIR / path
+    path = path.resolve()
+    try:
+        path.relative_to(PROJECT_DIR)
+    except ValueError as exc:
+        raise CardGenError(f"プロジェクト外のパスは使用できません: {path}") from exc
+    return path
+
+
+def project_relative(path: Path) -> str:
+    return str(path.resolve().relative_to(PROJECT_DIR))
+
+
+def validate_local_url(base_url: str) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise CardGenError(
+            "安全のためcomfy_urlはhttp://127.0.0.1:<port>または"
+            "http://localhost:<port>のみ許可します。"
+        )
+
+
+def require_schema_version(
+    document: dict[str, Any], label: str, expected: int
+) -> None:
+    """App config and profiles version independently; pass the one you mean."""
+    if document.get("schema_version") != expected:
+        raise CardGenError(
+            f"{label}のschema_versionは{expected}である必要があります: "
+            f"{document.get('schema_version')!r}"
+        )
+
+
+def load_app_config(path: Path) -> dict[str, Any]:
+    app = load_json(path)
+    require_schema_version(app, "app config", APP_CONFIG_SCHEMA_VERSION)
+
+    base_url = str(app.get("comfy_url", "http://127.0.0.1:8188"))
+    validate_local_url(base_url)
+    app["comfy_url"] = base_url
+    app["app_config_path"] = path
+
+    default_profile = app.get("default_profile")
+    if not isinstance(default_profile, str) or not PROFILE_ID_PATTERN.fullmatch(
+        default_profile
+    ):
+        raise CardGenError("default_profileが不正です。")
+
+    profiles_dir = app.get("profiles_dir", "config/profiles")
+    if not isinstance(profiles_dir, str) or not profiles_dir:
+        raise CardGenError("profiles_dirは文字列で指定してください。")
+    app["profiles_dir_path"] = resolve_project_path(profiles_dir)
+
+    output_dir = app.get("output_dir", "outputs")
+    if not isinstance(output_dir, str) or not output_dir:
+        raise CardGenError("output_dirは文字列で指定してください。")
+    app["output_dir_path"] = resolve_project_path(output_dir)
+
+    for key, default in (
+        ("request_timeout_seconds", 60),
+        ("generation_timeout_seconds", 900),
+    ):
+        value = app.get(key, default)
+        if not isinstance(value, int) or value < 1:
+            raise CardGenError(f"{key}は1以上の整数で指定してください。")
+        app[key] = value
+
+    return app
+
+
+def validate_profile_id(profile_id: str) -> None:
+    if not PROFILE_ID_PATTERN.fullmatch(profile_id):
+        raise CardGenError(
+            "profile IDは英数字で始まり、英数字・ピリオド・ハイフン・"
+            "アンダースコアだけを使用してください。"
+        )
+
+
+def profile_path(app: dict[str, Any], profile_id: str) -> Path:
+    validate_profile_id(profile_id)
+    profiles_dir = app["profiles_dir_path"]
+    if not isinstance(profiles_dir, Path):
+        raise CardGenError("profiles_dir_pathが不正です。")
+    return resolve_project_path(profiles_dir / f"{profile_id}.json")
+
+
+def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
+    raw = profile.get("approved_models")
+    if not isinstance(raw, dict):
+        raise CardGenError("approved_modelsはオブジェクトで指定してください。")
+
+    result: dict[str, set[str]] = {}
+    allowed_categories = {
+        "checkpoints", "unet", "clip", "vae", "loras", "upscale_models",
+    }
+    unknown = sorted(set(raw) - allowed_categories)
+    if unknown:
+        raise CardGenError(
+            "approved_modelsに未対応カテゴリがあります: " + ", ".join(unknown)
+        )
+
+    for category in allowed_categories:
+        values = raw.get(category, [])
+        if not isinstance(values, list) or not all(
+            isinstance(item, str) and item for item in values
+        ):
+            raise CardGenError(
+                f"approved_models.{category}は空でない文字列の配列で指定してください。"
+            )
+        result[category] = set(values)
+
+    if not any(result.values()):
+        raise CardGenError("approved_modelsがすべて空です。")
+    return result
+
+
+def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any]:
+    profile_id = requested_id or str(app["default_profile"])
+    path = profile_path(app, profile_id)
+    profile = load_json(path)
+    require_schema_version(profile, f"profile {profile_id}", PROFILE_SCHEMA_VERSION)
+
+    actual_id = profile.get("id")
+    if actual_id != profile_id:
+        raise CardGenError(
+            f"プロファイルIDがファイル名と一致しません: {actual_id!r} != {profile_id!r}"
+        )
+
+    display_name = profile.get("display_name")
+    if not isinstance(display_name, str) or not display_name:
+        raise CardGenError("display_nameは空でない文字列で指定してください。")
+
+    workflow = profile.get("workflow")
+    if not isinstance(workflow, str) or not workflow:
+        raise CardGenError("workflowは空でない文字列で指定してください。")
+    profile["workflow_path"] = resolve_project_path(workflow)
+    profile["profile_path"] = path
+    profile["approved_model_sets"] = normalize_approved_models(profile)
+
+    capabilities = profile.get("capabilities", {})
+    if not isinstance(capabilities, dict):
+        raise CardGenError("capabilitiesはオブジェクトで指定してください。")
+    expected_negative = capabilities.get("negative_prompt_mode")
+    if expected_negative not in {None, "text", "zeroed", "mixed"}:
+        raise CardGenError(
+            "capabilities.negative_prompt_modeはtext、zeroed、mixedのいずれかです。"
+        )
+    if "refiner" in capabilities:
+        raise CardGenError(
+            "capabilities.refinerは廃止されました。Sampler数が2以上であることしか"
+            "表しておらず、refinerとhires fixを区別できません。"
+            "capabilities.multi_passへ改名してください。"
+        )
+    expected_multi_pass = capabilities.get("multi_pass")
+    if expected_multi_pass is not None and not isinstance(expected_multi_pass, bool):
+        raise CardGenError("capabilities.multi_passは真偽値で指定してください。")
+
+    defaults = profile.get("defaults", {})
+    if not isinstance(defaults, dict):
+        raise CardGenError("defaultsはオブジェクトで指定してください。")
+    negative_default = defaults.get("negative_prompt", "")
+    if not isinstance(negative_default, str):
+        raise CardGenError("defaults.negative_promptは文字列で指定してください。")
+
+    return profile
+
+
+def request_json(
+    base_url: str,
+    method: str,
+    path: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    timeout: int,
+) -> dict[str, Any]:
+    data = None
+    headers: dict[str, str] = {}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}{path}",
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+    except urllib.error.URLError as exc:
+        raise CardGenError(f"ComfyUIへ接続できません: {exc}") from exc
+
+    if not body:
+        return {}
+    try:
+        value = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CardGenError(f"ComfyUIの応答がJSONではありません: {path}") from exc
+    if not isinstance(value, dict):
+        raise CardGenError(f"ComfyUIの応答形式が想定外です: {path}")
+    return value
+
+
+def sampler_nodes(workflow: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    result: list[tuple[str, dict[str, Any]]] = []
+    for node_id, node in workflow.items():
+        if isinstance(node, dict) and node.get("class_type") in SAMPLER_TYPES:
+            result.append((str(node_id), node))
+    if not result:
+        raise CardGenError("KSamplerまたはKSamplerAdvancedが見つかりません。")
+    return result
+
+
+def linked_node_id(value: Any, label: str) -> str:
+    if isinstance(value, list) and value and isinstance(value[0], (str, int)):
+        return str(value[0])
+    raise CardGenError(f"{label}のノード接続を解釈できません。")
+
+
+def set_prompt_node_text(node_id: str, node: dict[str, Any], text: str) -> None:
+    class_type = str(node.get("class_type"))
+    fields = PROMPT_FIELDS.get(class_type)
+    inputs = node.get("inputs")
+    if not fields or not isinstance(inputs, dict):
+        raise CardGenError(
+            f"未対応のプロンプトノードです: node {node_id} ({class_type})。"
+            "対応済みはCLIPTextEncode、CLIPTextEncodeSDXL、"
+            "CLIPTextEncodeSDXLRefinerです。"
+        )
+
+    present_fields = [field for field in fields if field in inputs]
+    if not present_fields:
+        raise CardGenError(
+            f"プロンプト入力フィールドがありません: node {node_id} ({class_type})"
+        )
+    for field in present_fields:
+        inputs[field] = text
+
+
+def set_condition_text(
+    workflow: dict[str, Any],
+    sampler: dict[str, Any],
+    sampler_input: str,
+    text: str,
+) -> tuple[str, bool]:
+    """Apply prompt text to a sampler conditioning input.
+
+    Returns ``(conditioning_node_id, text_applied)``. A negative input routed
+    through ConditioningZeroOut is valid but has no independent negative text.
+    """
+    inputs = sampler.get("inputs")
+    if not isinstance(inputs, dict) or sampler_input not in inputs:
+        raise CardGenError(f"Samplerに{sampler_input}入力がありません。")
+
+    node_id = linked_node_id(inputs[sampler_input], sampler_input)
+    node = workflow.get(node_id)
+    if not isinstance(node, dict):
+        raise CardGenError(f"条件付けノードがありません: {node_id}")
+
+    class_type = str(node.get("class_type"))
+    if class_type in PROMPT_FIELDS:
+        set_prompt_node_text(node_id, node, text)
+        return node_id, True
+
+    if sampler_input == "negative" and class_type == "ConditioningZeroOut":
+        node_inputs = node.get("inputs")
+        if not isinstance(node_inputs, dict) or "conditioning" not in node_inputs:
+            raise CardGenError(
+                f"ConditioningZeroOutのconditioning入力がありません: node {node_id}"
+            )
+        source_id = linked_node_id(
+            node_inputs["conditioning"], f"ConditioningZeroOut node {node_id}"
+        )
+        source = workflow.get(source_id)
+        if not isinstance(source, dict):
+            raise CardGenError(
+                f"ConditioningZeroOutの接続元ノードがありません: node {source_id}"
+            )
+        return node_id, False
+
+    raise CardGenError(
+        f"{sampler_input}が対応済み条件付けへ直接接続されていません: "
+        f"node {node_id} ({class_type})。ControlNet、Conditioning Combine、"
+        "地域プロンプト等は個別対応が必要です。"
+    )
+
+
+def set_all_sampler_prompts(
+    workflow: dict[str, Any], positive: str, negative: str
+) -> tuple[list[str], list[str], list[str]]:
+    positive_nodes: set[str] = set()
+    negative_nodes: set[str] = set()
+    zeroed_negative_nodes: set[str] = set()
+
+    for _, sampler in sampler_nodes(workflow):
+        positive_id, positive_applied = set_condition_text(
+            workflow, sampler, "positive", positive
+        )
+        if not positive_applied:
+            raise CardGenError(
+                f"positiveプロンプトを適用できませんでした: node {positive_id}"
+            )
+        positive_nodes.add(positive_id)
+
+        negative_id, negative_applied = set_condition_text(
+            workflow, sampler, "negative", negative
+        )
+        negative_nodes.add(negative_id)
+        if not negative_applied:
+            zeroed_negative_nodes.add(negative_id)
+
+    return (
+        sorted(positive_nodes),
+        sorted(negative_nodes),
+        sorted(zeroed_negative_nodes),
+    )
+
+
+def detect_negative_mode(
+    negative_nodes: list[str], zeroed_negative_nodes: list[str]
+) -> str:
+    if not zeroed_negative_nodes:
+        return "text"
+    if len(zeroed_negative_nodes) == len(set(negative_nodes)):
+        return "zeroed"
+    return "mixed"
+
+
+def collect_model_uses(workflow: dict[str, Any]) -> list[dict[str, str]]:
+    used: list[dict[str, str]] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type"))
+        fields = MODEL_INPUTS.get(class_type)
+        if not fields:
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for field, category in fields.items():
+            value = inputs.get(field)
+            if isinstance(value, str) and value:
+                used.append(
+                    {
+                        "node_id": str(node_id),
+                        "class_type": class_type,
+                        "field": field,
+                        "category": category,
+                        "filename": value,
+                    }
+                )
+    if not used:
+        raise CardGenError(
+            "対応するモデルLoaderが見つかりません。CheckpointLoader、UNETLoader、"
+            "CLIPLoader、VAELoader等を確認してください。"
+        )
+    return used
+
+
+def verify_approved_models(
+    workflow: dict[str, Any], approved: dict[str, set[str]]
+) -> list[dict[str, str]]:
+    used = collect_model_uses(workflow)
+    unapproved = [
+        item
+        for item in used
+        if item["filename"] not in approved.get(item["category"], set())
+    ]
+    if unapproved:
+        details = ", ".join(
+            f"{item['category']}:{item['filename']} (node {item['node_id']})"
+            for item in unapproved
+        )
+        raise CardGenError("未承認モデルがワークフローに含まれています: " + details)
+    return used
+
+
+def apply_checkpoint_override(
+    workflow: dict[str, Any], approved: dict[str, set[str]], checkpoint: str
+) -> list[str]:
+    if checkpoint not in approved.get("checkpoints", set()):
+        raise CardGenError(
+            "--checkpointで指定したファイルはこのプロファイルで承認されていません: "
+            + checkpoint
+        )
+
+    changed: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in {
+            "CheckpointLoaderSimple",
+            "CheckpointLoader",
+        }:
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and "ckpt_name" in inputs:
+            inputs["ckpt_name"] = checkpoint
+            changed.append(str(node_id))
+
+    if not changed:
+        raise CardGenError(
+            "このワークフローには--checkpointで変更できるCheckpointLoaderがありません。"
+        )
+    return sorted(changed)
+
+
+def apply_latent_size(
+    workflow: dict[str, Any], width: int, height: int
+) -> list[str]:
+    if width < 64 or height < 64:
+        raise CardGenError("--widthと--heightは64以上で指定してください。")
+    if width % 8 or height % 8:
+        raise CardGenError("--widthと--heightは8の倍数で指定してください。")
+
+    changed: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in LATENT_TYPES:
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and "width" in inputs and "height" in inputs:
+            inputs["width"] = width
+            inputs["height"] = height
+            changed.append(str(node_id))
+
+    if not changed:
+        raise CardGenError(
+            "このワークフローには解像度を変更できる空Latentノードがありません。"
+        )
+    return sorted(changed)
+
+
+def apply_sampler_params(
+    workflow: dict[str, Any], params: dict[str, Any]
+) -> dict[str, list[str]]:
+    """Overwrite sampler inputs on every sampler node that exposes them."""
+    changed: dict[str, list[str]] = {}
+    for field in SAMPLER_OVERRIDE_FIELDS:
+        value = params.get(field)
+        if value is None:
+            continue
+
+        nodes: list[str] = []
+        for node_id, node in sampler_nodes(workflow):
+            inputs = node.get("inputs")
+            if isinstance(inputs, dict) and field in inputs:
+                inputs[field] = value
+                nodes.append(node_id)
+
+        if not nodes:
+            option = "--" + field.replace("sampler_name", "sampler").replace("_", "-")
+            raise CardGenError(
+                f"{option}を適用できるSampler入力がこのワークフローにありません。"
+            )
+        changed[field] = sorted(nodes)
+    return changed
+
+
+def describe_generation_settings(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Snapshot the settings actually queued, including workflow defaults.
+
+    Recording overrides alone would leave a run untraceable whenever a value
+    came from the workflow file instead of the command line.
+    """
+    latents: list[dict[str, Any]] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") not in LATENT_TYPES:
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        latents.append(
+            {
+                "node_id": str(node_id),
+                "class_type": node.get("class_type"),
+                "width": inputs.get("width"),
+                "height": inputs.get("height"),
+                "batch_size": inputs.get("batch_size"),
+            }
+        )
+
+    samplers: list[dict[str, Any]] = []
+    for node_id, node in sampler_nodes(workflow):
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        entry: dict[str, Any] = {
+            "node_id": node_id,
+            "class_type": node.get("class_type"),
+        }
+        for field in SAMPLER_RECORD_FIELDS:
+            if field in inputs:
+                entry[field] = inputs[field]
+        samplers.append(entry)
+
+    return {
+        "latents": sorted(latents, key=lambda item: item["node_id"]),
+        "samplers": sorted(samplers, key=lambda item: item["node_id"]),
+    }
+
+
+def get_primary_sampler(workflow: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    samplers = sampler_nodes(workflow)
+
+    # Base sampler in a Base + Refiner graph usually adds the initial noise.
+    for node_id, node in samplers:
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and inputs.get("add_noise") == "enable":
+            return node_id, node
+
+    for node_id, node in samplers:
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and ("seed" in inputs or "noise_seed" in inputs):
+            return node_id, node
+
+    raise CardGenError("seedまたはnoise_seedを持つSamplerが見つかりません。")
+
+
+def set_sampler_seed(sampler: dict[str, Any], seed: int) -> str:
+    inputs = sampler.get("inputs")
+    if not isinstance(inputs, dict):
+        raise CardGenError("Samplerのinputsが不正です。")
+    if "seed" in inputs:
+        inputs["seed"] = seed
+        return "seed"
+    if "noise_seed" in inputs:
+        inputs["noise_seed"] = seed
+        return "noise_seed"
+    raise CardGenError("Samplerにseedまたはnoise_seed入力がありません。")
+
+
+def set_save_prefix(workflow: dict[str, Any], prefix: str) -> None:
+    found = False
+    for node in workflow.values():
+        if not isinstance(node, dict) or node.get("class_type") != "SaveImage":
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict):
+            inputs["filename_prefix"] = prefix
+            found = True
+    if not found:
+        raise CardGenError("SaveImageノードが見つかりません。")
+
+
+def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
+    workflow_path = profile["workflow_path"]
+    if not isinstance(workflow_path, Path):
+        raise CardGenError("workflow_pathが不正です。")
+    workflow = load_json(workflow_path)
+
+    approved = profile["approved_model_sets"]
+    if not isinstance(approved, dict):
+        raise CardGenError("approved_model_setsが不正です。")
+    model_uses = verify_approved_models(workflow, approved)
+
+    probe = copy.deepcopy(workflow)
+    positive_nodes, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
+        probe, "validation positive prompt", "validation negative prompt"
+    )
+    negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
+    sampler_count = len(sampler_nodes(workflow))
+    # Sampler count alone cannot tell a refiner from a hires pass; it only says
+    # the graph denoises more than once.
+    multi_pass_detected = sampler_count > 1
+
+    capabilities = profile.get("capabilities", {})
+    expected_negative = capabilities.get("negative_prompt_mode")
+    if expected_negative is not None and expected_negative != negative_mode:
+        raise CardGenError(
+            "プロファイルのnegative_prompt_modeとワークフローが一致しません: "
+            f"expected={expected_negative}, detected={negative_mode}"
+        )
+    expected_multi_pass = capabilities.get("multi_pass")
+    if expected_multi_pass is not None and expected_multi_pass != multi_pass_detected:
+        raise CardGenError(
+            "プロファイルのmulti_pass指定とSampler数が一致しません: "
+            f"expected={expected_multi_pass}, detected={multi_pass_detected}"
+        )
+
+    primary_id, primary_sampler = get_primary_sampler(probe)
+    seed_field = set_sampler_seed(primary_sampler, 1)
+    set_save_prefix(probe, "CardGen/validation")
+
+    return {
+        "profile": profile["id"],
+        "display_name": profile["display_name"],
+        "profile_file": project_relative(profile["profile_path"]),
+        "workflow": project_relative(workflow_path),
+        "sampler_count": sampler_count,
+        "multi_pass_detected": multi_pass_detected,
+        "primary_sampler": primary_id,
+        "seed_field": seed_field,
+        "positive_prompt_nodes": positive_nodes,
+        "negative_conditioning_nodes": negative_nodes,
+        "zeroed_negative_nodes": zeroed_negative_nodes,
+        "negative_prompt_mode": negative_mode,
+        "model_uses": model_uses,
+    }
+
+
+def queue_prompt(
+    app: dict[str, Any], workflow: dict[str, Any]
+) -> str:
+    result = request_json(
+        app["comfy_url"],
+        "POST",
+        "/prompt",
+        payload={"prompt": workflow},
+        timeout=app["request_timeout_seconds"],
+    )
+    prompt_id = result.get("prompt_id")
+    if not isinstance(prompt_id, str) or not prompt_id:
+        raise CardGenError(f"prompt_idを取得できませんでした: {result}")
+    return prompt_id
+
+
+def wait_for_history(
+    app: dict[str, Any], prompt_id: str, timeout_seconds: int
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    quoted = urllib.parse.quote(prompt_id, safe="")
+    while time.monotonic() < deadline:
+        history = request_json(
+            app["comfy_url"],
+            "GET",
+            f"/history/{quoted}",
+            timeout=app["request_timeout_seconds"],
+        )
+        entry = history.get(prompt_id)
+        if isinstance(entry, dict):
+            status = entry.get("status")
+            if isinstance(status, dict) and status.get("status_str") == "error":
+                raise CardGenError(
+                    "ComfyUI実行エラー:\n"
+                    + json.dumps(status, ensure_ascii=False, indent=2)
+                )
+            outputs = entry.get("outputs")
+            if isinstance(outputs, dict) and outputs:
+                return entry
+        time.sleep(1.0)
+    raise CardGenError(f"生成がタイムアウトしました: {timeout_seconds}秒")
+
+
+def download_outputs(
+    app: dict[str, Any],
+    history_entry: dict[str, Any],
+    output_dir: Path,
+    stem: str,
+) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[Path] = []
+    outputs = history_entry.get("outputs", {})
+    if not isinstance(outputs, dict):
+        return saved
+
+    image_index = 1
+    for node_output in outputs.values():
+        if not isinstance(node_output, dict):
+            continue
+        images = node_output.get("images", [])
+        if not isinstance(images, list):
+            continue
+        for image in images:
+            if not isinstance(image, dict) or "filename" not in image:
+                continue
+            query = urllib.parse.urlencode(
+                {
+                    "filename": image["filename"],
+                    "subfolder": image.get("subfolder", ""),
+                    "type": image.get("type", "output"),
+                }
+            )
+            url = f"{app['comfy_url'].rstrip('/')}/view?{query}"
+            try:
+                with urllib.request.urlopen(
+                    url, timeout=app["request_timeout_seconds"]
+                ) as response:
+                    content = response.read()
+            except urllib.error.URLError as exc:
+                raise CardGenError(f"画像を取得できません: {exc}") from exc
+
+            suffix = Path(str(image["filename"])).suffix or ".png"
+            destination = output_dir / f"{stem}_{image_index:02d}{suffix}"
+            destination.write_bytes(content)
+            saved.append(destination)
+            image_index += 1
+    return saved
+
+
+def command_profiles(app: dict[str, Any]) -> int:
+    profiles_dir = app["profiles_dir_path"]
+    if not isinstance(profiles_dir, Path):
+        raise CardGenError("profiles_dir_pathが不正です。")
+    if not profiles_dir.is_dir():
+        raise CardGenError(f"profiles_dirがありません: {profiles_dir}")
+
+    found = 0
+    for path in sorted(profiles_dir.glob("*.json")):
+        raw = load_json(path)
+        profile_id = raw.get("id", path.stem)
+        display_name = raw.get("display_name", "(display_nameなし)")
+        marker = "*" if profile_id == app["default_profile"] else " "
+        workflow_raw = raw.get("workflow")
+        workflow_exists = False
+        if isinstance(workflow_raw, str):
+            try:
+                workflow_exists = resolve_project_path(workflow_raw).is_file()
+            except CardGenError:
+                workflow_exists = False
+        status = "ready" if workflow_exists else "workflow missing"
+        print(f"{marker} {profile_id}: {display_name} [{status}]")
+        found += 1
+    if not found:
+        raise CardGenError("プロファイルがありません。")
+    print("* = default profile")
+    return 0
+
+
+def command_check(app: dict[str, Any]) -> int:
+    stats = request_json(
+        app["comfy_url"],
+        "GET",
+        "/system_stats",
+        timeout=app["request_timeout_seconds"],
+    )
+    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_validate(
+    app: dict[str, Any], requested_profile: str | None, validate_all: bool
+) -> int:
+    if validate_all:
+        profiles_dir = app["profiles_dir_path"]
+        if not isinstance(profiles_dir, Path):
+            raise CardGenError("profiles_dir_pathが不正です。")
+        ids = [path.stem for path in sorted(profiles_dir.glob("*.json"))]
+        if not ids:
+            raise CardGenError("検証対象プロファイルがありません。")
+    else:
+        ids = [requested_profile or str(app["default_profile"])]
+
+    summaries: list[dict[str, Any]] = []
+    for profile_id in ids:
+        profile = load_profile(app, profile_id)
+        summary = validate_profile_workflow(profile)
+        summaries.append(summary)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        print(f"VALID: profile={profile_id}")
+    if len(summaries) > 1:
+        print(f"VALID ALL: {len(summaries)} profiles")
+    return 0
+
+
+def command_generate(
+    args: argparse.Namespace, app: dict[str, Any], requested_profile: str | None
+) -> int:
+    profile = load_profile(app, requested_profile)
+    workflow_path = profile["workflow_path"]
+    if not isinstance(workflow_path, Path):
+        raise CardGenError("workflow_pathが不正です。")
+    workflow = load_json(workflow_path)
+
+    approved = profile["approved_model_sets"]
+    if not isinstance(approved, dict):
+        raise CardGenError("approved_model_setsが不正です。")
+
+    checkpoint_nodes: list[str] = []
+    if args.checkpoint:
+        checkpoint_nodes = apply_checkpoint_override(
+            workflow, approved, args.checkpoint
+        )
+
+    model_uses = verify_approved_models(workflow, approved)
+
+    latent_nodes: list[str] = []
+    if args.width is not None or args.height is not None:
+        if args.width is None or args.height is None:
+            raise CardGenError("--widthと--heightは同時に指定してください。")
+        latent_nodes = apply_latent_size(workflow, args.width, args.height)
+
+    sampler_overrides = apply_sampler_params(
+        workflow,
+        {
+            "steps": args.steps,
+            "cfg": args.cfg,
+            "sampler_name": args.sampler_name,
+            "scheduler": args.scheduler,
+        },
+    )
+    if args.steps is not None and len(sampler_nodes(workflow)) > 1:
+        print(
+            "NOTE: このワークフローには複数のSamplerがあります。--stepsは全Samplerへ"
+            "適用されますが、start_at_step/end_at_stepの分割点は変更しません。"
+        )
+
+    defaults = profile.get("defaults", {})
+    default_negative = defaults.get("negative_prompt", "")
+    negative = args.negative if args.negative is not None else default_negative
+    if not isinstance(negative, str):
+        raise CardGenError("negative promptが不正です。")
+
+    _, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
+        workflow, args.prompt, negative
+    )
+    negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
+    if negative_mode in {"zeroed", "mixed"} and negative.strip():
+        print(
+            "NOTE: このワークフローのnegative条件付けにはConditioningZeroOutが"
+            "含まれます。該当経路では--negativeの文字列は適用されません。"
+        )
+
+    output_dir = app["output_dir_path"]
+    if not isinstance(output_dir, Path):
+        raise CardGenError("output_dir_pathが不正です。")
+
+    primary_id, primary_sampler = get_primary_sampler(workflow)
+    set_sampler_seed(primary_sampler, 1)  # Validate before entering the loop.
+
+    timeout = (
+        args.timeout
+        if args.timeout is not None
+        else int(app["generation_timeout_seconds"])
+    )
+    if timeout < 1:
+        raise CardGenError("--timeoutは1以上の整数で指定してください。")
+
+    results: list[dict[str, Any]] = []
+    session_stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    for index in range(args.count):
+        current = copy.deepcopy(workflow)
+        current_primary = current.get(primary_id)
+        if not isinstance(current_primary, dict):
+            raise CardGenError(f"Primary samplerが不正です: {primary_id}")
+
+        seed = (
+            args.seed + index
+            if args.seed is not None
+            else secrets.randbelow(2**63 - 1)
+        )
+        set_sampler_seed(current_primary, seed)
+
+        stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}_seed{seed}"
+        set_save_prefix(current, f"CardGen/{profile['id']}/{session_stamp}/{stem}")
+        prompt_id = queue_prompt(app, current)
+        print(
+            f"[{index + 1}/{args.count}] profile={profile['id']} "
+            f"queued={prompt_id} seed={seed}"
+        )
+        history = wait_for_history(app, prompt_id, timeout)
+        files = download_outputs(app, history, output_dir, stem)
+        if not files:
+            raise CardGenError("ComfyUI履歴にダウンロード可能な画像がありません。")
+        results.append(
+            {
+                "prompt_id": prompt_id,
+                "seed": seed,
+                "files": [project_relative(path) for path in files],
+            }
+        )
+        for path in files:
+            print(f"RESULT: {path}")
+
+    metadata = {
+        "schema_version": 4,
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "app_config": project_relative(app["app_config_path"]),
+        "profile": profile["id"],
+        "profile_file": project_relative(profile["profile_path"]),
+        "workflow": project_relative(workflow_path),
+        "model_uses": model_uses,
+        "checkpoint_override": args.checkpoint,
+        "checkpoint_nodes": checkpoint_nodes,
+        "generation_settings": describe_generation_settings(workflow),
+        "setting_overrides": {
+            "width": args.width,
+            "height": args.height,
+            "latent_nodes": latent_nodes,
+            "sampler_nodes": sampler_overrides,
+        },
+        "prompt": args.prompt,
+        "negative": negative,
+        "negative_prompt_mode": negative_mode,
+        "results": results,
+    }
+    metadata_path = output_dir / f"{profile['id']}_{session_stamp}_metadata.json"
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"METADATA: {metadata_path}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Named-profile ComfyUI card illustration runner"
+    )
+    parser.add_argument(
+        "--app-config",
+        default=str(DEFAULT_APP_CONFIG),
+        help="共通設定JSON（既定: config/app.json）",
+    )
+    parser.add_argument(
+        "--profile",
+        help="config/profiles/<ID>.jsonのプロファイルID（省略時は既定値）",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("profiles", help="利用可能なプロファイルを一覧表示")
+    subparsers.add_parser("check", help="ComfyUI接続とGPU情報を確認")
+
+    validate = subparsers.add_parser("validate", help="プロファイルとAPIワークフローを検証")
+    validate.add_argument(
+        "--profile",
+        dest="profile",
+        default=argparse.SUPPRESS,
+        help="プロファイルID（サブコマンド後にも指定可能）",
+    )
+    validate.add_argument(
+        "--all", action="store_true", help="すべてのプロファイルを検証"
+    )
+
+    generate = subparsers.add_parser("generate", help="選択したプロファイルで画像生成")
+    generate.add_argument(
+        "--profile",
+        dest="profile",
+        default=argparse.SUPPRESS,
+        help="プロファイルID（サブコマンド後にも指定可能）",
+    )
+    generate.add_argument("--prompt", required=True, help="ポジティブプロンプト")
+    generate.add_argument(
+        "--negative",
+        default=None,
+        help="ネガティブプロンプト（省略時はプロファイル既定値）",
+    )
+    generate.add_argument(
+        "--checkpoint",
+        help="承認済みCheckpointへ全CheckpointLoaderを切り替える",
+    )
+    generate.add_argument("--count", type=int, default=1, choices=range(1, 9))
+    generate.add_argument("--seed", type=int)
+    generate.add_argument("--timeout", type=int)
+    generate.add_argument(
+        "--width", type=int, help="出力幅（8の倍数、--heightと同時指定）"
+    )
+    generate.add_argument(
+        "--height", type=int, help="出力高さ（8の倍数、--widthと同時指定）"
+    )
+    generate.add_argument("--steps", type=int, help="サンプリングステップ数")
+    generate.add_argument("--cfg", type=float, help="CFG scale")
+    generate.add_argument(
+        "--sampler", dest="sampler_name", help="sampler_name（例: euler_ancestral）"
+    )
+    generate.add_argument("--scheduler", help="scheduler（例: normal, karras）")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        app_path = resolve_project_path(args.app_config)
+        app = load_app_config(app_path)
+        if args.profile is not None:
+            validate_profile_id(args.profile)
+
+        if args.command == "profiles":
+            return command_profiles(app)
+        if args.command == "check":
+            return command_check(app)
+        if args.command == "validate":
+            return command_validate(app, args.profile, args.all)
+        if args.command == "generate":
+            return command_generate(args, app, args.profile)
+        parser.error("unknown command")
+    except CardGenError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

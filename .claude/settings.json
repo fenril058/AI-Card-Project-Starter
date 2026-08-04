@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Bash(uv sync)",
+      "Bash(uv run python cardgen.py profiles)",
+      "Bash(uv run python cardgen.py check)",
+      "Bash(uv run python cardgen.py validate)",
+      "Bash(uv run python cardgen.py validate --all)",
+      "Bash(uv run python cardgen.py --profile:*)",
+      "Bash(uv run python cardgen.py generate:*)",
+      "Read(config/**)",
+      "Read(workflows/**)",
+      "Read(outputs/**)",
+      "Read(logs/**)",
+      "Read(licenses/**)"
+    ],
+    "ask": [
+      "Edit(cardgen.py)",
+      "Write(cardgen.py)",
+      "Edit(config/**)",
+      "Write(config/**)",
+      "Edit(workflows/**)",
+      "Write(workflows/**)",
+      "Edit(pyproject.toml)",
+      "Write(pyproject.toml)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(secrets/**)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(irm:*)",
+      "Bash(Invoke-WebRequest:*)",
+      "Bash(Remove-Item:*)",
+      "Bash(del:*)",
+      "Bash(rm:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

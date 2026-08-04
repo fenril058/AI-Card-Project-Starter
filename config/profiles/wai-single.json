@@ -1,0 +1,23 @@
+{
+  "schema_version": 4,
+  "id": "wai-single",
+  "display_name": "WAI Illustrious SDXL (Single Pass)",
+  "workflow": "workflows/approved/wai_sdxl_single_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "approved_models": {
+    "checkpoints": [
+      "waiIllustriousSDXL_v170.safetensors"
+    ],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "text, logo, watermark, low quality, malformed hands"
+  }
+}

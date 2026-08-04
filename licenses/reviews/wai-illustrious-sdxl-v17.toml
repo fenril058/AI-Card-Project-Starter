@@ -1,0 +1,25 @@
+status = "reviewing"
+reviewed_at = "2026-08-02"
+reviewed_by = "Claude (AI調査 / Web一次情報ベース、要人間の最終確認)"
+
+todo = [
+  "自前で有料ホスティング/APIとして提供する計画がある場合、Civitaiの許諾は「RentCivit」(Civitai自身の生成サービス上での利用)のみで一般的な「Rent」は許諾されていないため、Civitai運営に別途確認する。",
+  "モデル自体を販売・マネタイズする計画がある場合、ベースモデルIllustriousのFair AI Public License 1.0-SD（重みやマージレシピの公開義務）とWAI-illustrious-SDXL側の許諾内容の両方を満たせるか法務確認する。",
+  "カード画像を商用販売する計画が具体化した時点で、本レビューの`status`を`approved`に更新する。",
+]
+
+notes = [
+  "Civitai model API (https://civitai.com/api/v1/models/827184) より本人確認: allowCommercialUse=[\"Image\",\"RentCivit\"], allowNoCredit=true, allowDerivatives=true, allowDifferentLicense=true, baseModel=\"Illustrious\" (via version API https://civitai.com/api/v1/model-versions/2883731)。",
+  "「Image」許諾＝本モデルで生成した画像を商用利用・販売してよい。「RentCivit」＝Civitai自身の生成サービス上でのホスティングは許諾。「Rent」（Civitai以外の有料ホスティング/API提供）と「Sell」（モデルファイル自体の販売・有償マージ配布）は許諾リストに含まれていない点に注意。",
+  "allowNoCredit=trueのためクレジット表記は不要。allowDerivatives=true・allowDifferentLicense=trueのため、派生モデルの作成と異なるライセンスでの配布自体は作者から許諾されている。",
+  "ベースモデルIllustrious(-XL)はFair AI Public License 1.0-SD (FAIPL) 系で公開されており、クローズドソースなファインチューン/マージモデルのマネタイズを禁止し、派生モデルは重み・データセット情報・マージレシピの公開を求める傾向がある (https://civitai.com/articles/18619/what-the-license, https://huggingface.co/OnomaAIResearch/Illustrious-XL-v1.0/discussions/1)。WAI-illustrious-SDXL自体はCivitaiで重みが公開されており、この点では条件を満たしているとみられるが、当プロジェクトが独自にモデルを再配布・マージ配布する場合はFAIPL側の条件も別途確認が必要。",
+  "本プロジェクト(cardgen.py)はComfyUIをlocalhostのみで使用し、モデル自体の再配布や有料API提供は行っていない構成 (CLAUDE.md参照)。現状の「ローカルで画像生成し、生成物を後工程でカード化する」用途はallowCommercialUse=\"Image\"の範囲内と考えられるが、カード（生成物を含む商品）の商用販売を行う場合は上記todoの確認が必要なため、status=reviewingとして最終承認は保留する。",
+]
+
+[permissions]
+generated_output_commercial_use = "allowed"
+generated_output_sale = "allowed"
+model_redistribution = "allowed_with_conditions"
+derivative_model_distribution = "allowed_with_conditions"
+hosted_inference_or_api = "allowed_with_conditions"
+attribution = "not_required"

@@ -1,0 +1,9 @@
+{
+  "schema_version": 3,
+  "comfy_url": "http://127.0.0.1:8188",
+  "default_profile": "wai-hires",
+  "profiles_dir": "config/profiles",
+  "output_dir": "outputs",
+  "request_timeout_seconds": 60,
+  "generation_timeout_seconds": 900
+}

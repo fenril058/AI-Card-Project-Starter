@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0.0",
+  "asset_id": "qwen-3-4b",
+  "asset_type": "text_encoder",
+  "generated_at": "2026-08-02T08:30:44Z",
+  "identity": {
+    "name": "Qwen 3 4B",
+    "version_name": "main"
+  },
+  "source": {
+    "provider": "huggingface",
+    "canonical_url": "https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/text_encoders/qwen_3_4b.safetensors",
+    "api_url": "https://huggingface.co/api/models/Comfy-Org/z_image_turbo",
+    "provider_model_id": "Comfy-Org/z_image_turbo",
+    "provider_version_id": null,
+    "revision": "d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e",
+    "retrieved_at": "2026-08-02T17:30:44+09:00"
+  },
+  "provenance": {
+    "base_model": null,
+    "notes": []
+  },
+  "file": {
+    "filename": "split_files/text_encoders/qwen_3_4b.safetensors",
+    "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/text_encoders/qwen_3_4b.safetensors",
+    "provider_size_bytes": 8044982048,
+    "configured_path": "models/text_encoders/qwen_3_4b.safetensors",
+    "exists": false,
+    "size_bytes": null,
+    "sha256": null,
+    "provider_sha256": "6C671498573AC2F7A5501502CCCE8D2B08EA6CA2F661C458E708F36B36EDFC5A",
+    "verification": "local_file_missing"
+  },
+  "license": {
+    "declared": null,
+    "declared_url": null,
+    "notes": []
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_at": "2026-08-02",
+    "reviewed_by": "Claude (AI調査 / Web一次情報ベース、要人間の最終確認)",
+    "permissions": {
+      "generated_output_commercial_use": "allowed",
+      "generated_output_sale": "allowed",
+      "model_redistribution": "allowed_with_conditions",
+      "derivative_model_distribution": "allowed_with_conditions",
+      "hosted_inference_or_api": "allowed",
+      "attribution": "allowed_with_conditions"
+    },
+    "todo": [
+      "ダウンロード後、配布物にApache-2.0のLICENSE/NOTICE相当が含まれているか目視確認する。"
+    ],
+    "notes": [
+      "split_files/text_encoders/qwen_3_4b.safetensors はComfy-Orgがz_image_turbo/z_image用に配布しているsafetensors変換版。中身はAlibaba QwenチームのQwen3-4Bテキストエンコーダで、Z-Image(-Turbo)がテキストエンコーダとして採用している (https://huggingface.co/Comfy-Org/z_image_turbo/blob/main/split_files/text_encoders/qwen_3_4b.safetensors, https://huggingface.co/Comfy-Org/z_image_turbo/tree/main/split_files/text_encoders)。",
+      "元モデル Qwen/Qwen3-4B はHugging Face上でcardData.license=\"apache-2.0\"として公開されている (https://huggingface.co/Qwen/Qwen3-4B, https://huggingface.co/Qwen/Qwen3-4B/blob/main/LICENSE)。Qwen3系モデルは全てApache License 2.0で提供されている。",
+      "Comfy-Org側のリポジトリ自体には独自ライセンス表記が見当たらないが、フォーマット変換（safetensors分割）は再配布物に当たり、Apache-2.0の許諾範囲内で行われていると判断できる。上流ライセンスより厳しい制約を追加している記述は確認できなかった。",
+      "Apache-2.0は商用利用・再配布・改変・ホスティングを幅広く許可するが、再配布時は著作権表示・ライセンス全文・NOTICE（存在する場合）の保持、および変更箇所の明示が条件となる (Apache License 2.0 §4)。生成物（カード画像等）へのクレジット表記義務はない。"
+    ]
+  },
+  "evidence": [],
+  "provider_metadata": {
+    "last_modified": "2026-07-02T13:20:16+00:00",
+    "private": false,
+    "gated": false,
+    "pipeline_tag": null
+  }
+}

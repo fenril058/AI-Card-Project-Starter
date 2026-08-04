@@ -1,0 +1,22 @@
+status = "approved"
+reviewed_at = "2026-08-03"
+reviewed_by = "Codex (AI調査 / Web一次情報ベース、要人間の最終確認)"
+
+todo = [
+  "モデルファイルを再配布する場合はApache-2.0のLICENSEおよびNOTICE（存在する場合）を同梱する。",
+]
+
+notes = [
+  "black-forest-labs/FLUX.2-klein-4b-fp8 はBFL公式の蒸留FLUX.2 Klein 4B FP8配布リポジトリで、モデルカードとLICENSE.mdはいずれもApache-2.0を明示している。",
+  "BFL公式モデルカードは4B版を商用利用可能なopen weightsとして説明し、4Bの生成・編集用途をApache-2.0で提供している。",
+  "Apache-2.0は商用利用、改変、ホスティング、生成物の販売を許容する。重みまたは派生物の再配布時はライセンス全文、NOTICE、変更表示など第4条の条件に従う。",
+  "Apache-2.0第6条はBFLおよびFLUXの商標利用権を付与しないため、出所説明を超えて公式提携や推奨を示唆しない。",
+]
+
+[permissions]
+generated_output_commercial_use = "allowed"
+generated_output_sale = "allowed"
+model_redistribution = "allowed_with_conditions"
+derivative_model_distribution = "allowed_with_conditions"
+hosted_inference_or_api = "allowed"
+attribution = "allowed_with_conditions"

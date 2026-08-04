@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0.0",
+  "asset_id": "flux2-klein-4b-fp8",
+  "asset_type": "diffusion_model",
+  "generated_at": "2026-08-02T16:25:16Z",
+  "identity": {
+    "name": "FLUX.2 Klein 4B FP8",
+    "version_name": "main"
+  },
+  "source": {
+    "provider": "huggingface",
+    "canonical_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/blob/5b4408e59397a4a37ccb46afe426d8ed86379441/flux-2-klein-4b-fp8.safetensors",
+    "api_url": "https://huggingface.co/api/models/black-forest-labs/FLUX.2-klein-4b-fp8",
+    "provider_model_id": "black-forest-labs/FLUX.2-klein-4b-fp8",
+    "provider_version_id": null,
+    "revision": "5b4408e59397a4a37ccb46afe426d8ed86379441",
+    "retrieved_at": "2026-08-03T01:25:16+09:00"
+  },
+  "provenance": {
+    "base_model": null,
+    "notes": []
+  },
+  "file": {
+    "filename": "flux-2-klein-4b-fp8.safetensors",
+    "download_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/5b4408e59397a4a37ccb46afe426d8ed86379441/flux-2-klein-4b-fp8.safetensors",
+    "provider_size_bytes": 4070624520,
+    "configured_path": "models/diffusion_models/flux-2-klein-4b-fp8.safetensors",
+    "exists": false,
+    "size_bytes": null,
+    "sha256": null,
+    "provider_sha256": "97ED34FE0567E436200F2FAEE3939B88F2B5D99F8AF2A4DC16532C4245C0CCB6",
+    "verification": "local_file_missing"
+  },
+  "license": {
+    "declared": null,
+    "declared_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/blob/main/LICENSE.md",
+    "notes": []
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_at": "2026-08-03",
+    "reviewed_by": "Codex (AI調査 / Web一次情報ベース、要人間の最終確認)",
+    "permissions": {
+      "generated_output_commercial_use": "allowed",
+      "generated_output_sale": "allowed",
+      "model_redistribution": "allowed_with_conditions",
+      "derivative_model_distribution": "allowed_with_conditions",
+      "hosted_inference_or_api": "allowed",
+      "attribution": "allowed_with_conditions"
+    },
+    "todo": [
+      "モデルファイルを再配布する場合はApache-2.0のLICENSEおよびNOTICE（存在する場合）を同梱する。"
+    ],
+    "notes": [
+      "black-forest-labs/FLUX.2-klein-4b-fp8 はBFL公式の蒸留FLUX.2 Klein 4B FP8配布リポジトリで、モデルカードとLICENSE.mdはいずれもApache-2.0を明示している。",
+      "BFL公式モデルカードは4B版を商用利用可能なopen weightsとして説明し、4Bの生成・編集用途をApache-2.0で提供している。",
+      "Apache-2.0は商用利用、改変、ホスティング、生成物の販売を許容する。重みまたは派生物の再配布時はライセンス全文、NOTICE、変更表示など第4条の条件に従う。",
+      "Apache-2.0第6条はBFLおよびFLUXの商標利用権を付与しないため、出所説明を超えて公式提携や推奨を示唆しない。"
+    ]
+  },
+  "evidence": [],
+  "provider_metadata": {
+    "last_modified": "2026-02-24T00:50:22+00:00",
+    "private": false,
+    "gated": false,
+    "pipeline_tag": "image-to-image"
+  }
+}

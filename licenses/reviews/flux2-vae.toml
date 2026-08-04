@@ -1,0 +1,23 @@
+status = "approved"
+reviewed_at = "2026-08-03"
+reviewed_by = "Codex (AI調査 / Web一次情報ベース、要人間の最終確認)"
+
+todo = [
+  "VAE重みを再配布する場合はApache-2.0のLICENSEおよびNOTICE（存在する場合）を同梱し、Comfy-Org/ERNIE-Imageから取得した同一ハッシュの配布物であることを記録する。",
+]
+
+notes = [
+  "ComfyUI公式Flux.2 Kleinガイドは4B Base／Distilledの共通VAEとしてflux2-vae.safetensorsを指定している。",
+  "Comfy-Org/ERNIE-Imageのvae/flux2-vae.safetensorsは336,213,556 bytesで、Hugging Faceが示すSHA-256はd64f3a68e1cc4f9f4e29b6e0da38a0204fe9a49f2d4053f0ec1fa1ca02f9c4b5。同リポジトリはApache-2.0を明示している。",
+  "Comfy-Org/flux2-devのsplit_files/vae/flux2-vae.safetensorsもサイズ、Xet hash、SHA-256が完全一致しており、バイト単位で同一ファイル。ただし同リポジトリ全体のメタデータはFLUX.1 dev Non-Commercial Licenseを示すため、本記録ではApache-2.0を明示するERNIE-Image側の配布物を出所として採用する。",
+  "BFL公式black-forest-labs/FLUX.2-klein-4BにもApache-2.0のVAEが含まれる。公式Diffusers版は168 MB、SHA-256 ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04で、ComfyUI用336 MBファイルとはバイト同一ではないが、Klein 4BのVAE自体がApache-2.0配布されていることを補強する。",
+  "Apache-2.0は商用利用、生成物の販売、ホスティングを許容する。重みまたは派生物の再配布時はライセンス全文、NOTICE、変更表示など第4条の条件に従う。",
+]
+
+[permissions]
+generated_output_commercial_use = "allowed"
+generated_output_sale = "allowed"
+model_redistribution = "allowed_with_conditions"
+derivative_model_distribution = "allowed_with_conditions"
+hosted_inference_or_api = "allowed"
+attribution = "allowed_with_conditions"

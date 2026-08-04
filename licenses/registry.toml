@@ -1,0 +1,96 @@
+schema_version = 1
+
+[[assets]]
+id = "wai-illustrious-sdxl-v17"
+type = "checkpoint"
+name = "WAI-illustrious-SDXL"
+version_name = "v17.0"
+local_path = "models/checkpoints/waiIllustriousSDXL_v170.safetensors"
+[assets.source]
+provider = "civitai"
+model_version_id = 2883731
+filename = "waiIllustriousSDXL_v170.safetensors"
+
+[[assets]]
+id = "z-image-turbo-bf16"
+type = "diffusion_model"
+name = "Z-Image-Turbo"
+local_path = "models/diffusion_models/z_image_turbo_bf16.safetensors"
+[assets.source]
+provider = "huggingface"
+repo_id = "Comfy-Org/z_image_turbo"
+filename = "split_files/diffusion_models/z_image_turbo_bf16.safetensors"
+revision = "main"
+
+[[assets]]
+id = "qwen-3-4b"
+type = "text_encoder"
+name = "Qwen 3 4B"
+local_path = "models/text_encoders/qwen_3_4b.safetensors"
+[assets.source]
+provider = "huggingface"
+repo_id = "Comfy-Org/z_image_turbo"
+filename = "split_files/text_encoders/qwen_3_4b.safetensors"
+revision = "main"
+
+[[assets]]
+id = "z-image-ae"
+type = "vae"
+name = "Z-Image AE"
+local_path = "models/vae/ae.safetensors"
+[assets.source]
+provider = "huggingface"
+repo_id = "Comfy-Org/z_image_turbo"
+filename = "split_files/vae/ae.safetensors"
+revision = "main"
+
+[[assets]]
+id = "real-esrgan-x4plus-anime-6b"
+type = "upscale_model"
+name = "Real-ESRGAN x4plus anime 6B"
+version_name = "v0.2.2.4"
+local_path = "models/upscale_models/RealESRGAN_x4plus_anime_6B.pth"
+[assets.source]
+provider = "github_release"
+repo_id = "xinntao/Real-ESRGAN"
+filename = "RealESRGAN_x4plus_anime_6B.pth"
+revision = "v0.2.2.4"
+
+[[assets]]
+id = "flux2-klein-base-4b-fp8"
+type = "diffusion_model"
+name = "FLUX.2 Klein Base 4B FP8"
+local_path = "models/diffusion_models/flux-2-klein-base-4b-fp8.safetensors"
+license_url = "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4b-fp8/blob/main/LICENSE.md"
+[assets.source]
+provider = "huggingface"
+repo_id = "black-forest-labs/FLUX.2-klein-base-4b-fp8"
+filename = "flux-2-klein-base-4b-fp8.safetensors"
+revision = "main"
+
+[[assets]]
+id = "flux2-klein-4b-fp8"
+type = "diffusion_model"
+name = "FLUX.2 Klein 4B FP8"
+local_path = "models/diffusion_models/flux-2-klein-4b-fp8.safetensors"
+license_url = "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/blob/main/LICENSE.md"
+[assets.source]
+provider = "huggingface"
+repo_id = "black-forest-labs/FLUX.2-klein-4b-fp8"
+filename = "flux-2-klein-4b-fp8.safetensors"
+revision = "main"
+
+[[assets]]
+id = "flux2-vae"
+type = "vae"
+name = "FLUX.2 VAE"
+local_path = "models/vae/flux2-vae.safetensors"
+license_url = "https://huggingface.co/Comfy-Org/ERNIE-Image/blob/main/README.md"
+provenance_notes = [
+  "The identical file is also present in Comfy-Org/flux2-dev, whose repository-level license metadata differs. This record uses the Apache-2.0 Comfy-Org/ERNIE-Image distribution as its source.",
+]
+[assets.source]
+provider = "huggingface"
+repo_id = "Comfy-Org/ERNIE-Image"
+filename = "vae/flux2-vae.safetensors"
+revision = "main"
