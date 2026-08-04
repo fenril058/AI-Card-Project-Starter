@@ -31,8 +31,12 @@ DEFAULT_APP_CONFIG = PROJECT_DIR / "config" / "app.json"
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 APP_CONFIG_SCHEMA_VERSION = 3
 PROFILE_SCHEMA_VERSION = 4
-SAMPLER_TYPES = {"KSampler", "KSamplerAdvanced"}
-LATENT_TYPES = {"EmptyLatentImage", "EmptySD3LatentImage"}
+SAMPLER_TYPES = {"KSampler", "KSamplerAdvanced", "SamplerCustomAdvanced"}
+LATENT_TYPES = {
+    "EmptyLatentImage",
+    "EmptySD3LatentImage",
+    "EmptyFlux2LatentImage",
+}
 
 # Sampler inputs that --steps/--cfg/--sampler/--scheduler may overwrite.
 SAMPLER_OVERRIDE_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
@@ -102,6 +106,19 @@ def resolve_project_path(raw_path: str | Path) -> Path:
         path.relative_to(PROJECT_DIR)
     except ValueError as exc:
         raise CardGenError(f"プロジェクト外のパスは使用できません: {path}") from exc
+    return path
+
+
+def resolve_external_input_path(raw_path: str | Path) -> Path:
+    """Resolve one explicitly supplied local input without taking ownership of it."""
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        raise CardGenError(
+            "--input-imageは入力を所有するプロジェクト内の絶対パスで指定してください。"
+        )
+    path = path.resolve()
+    if not path.is_file():
+        raise CardGenError(f"入力画像がありません: {path}")
     return path
 
 
@@ -265,6 +282,10 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
     if not isinstance(negative_default, str):
         raise CardGenError("defaults.negative_promptは文字列で指定してください。")
 
+    bindings = profile.get("bindings")
+    if bindings is not None and not isinstance(bindings, dict):
+        raise CardGenError("bindingsはオブジェクトで指定してください。")
+
     return profile
 
 
@@ -305,13 +326,48 @@ def request_json(
     return value
 
 
+def upload_input_image(app: dict[str, Any], image_path: Path) -> str:
+    if not image_path.is_file():
+        raise CardGenError(f"入力画像がありません: {image_path}")
+    boundary = "----CardGen" + secrets.token_hex(16)
+    body = bytearray()
+    body.extend(f"--{boundary}\r\n".encode())
+    body.extend(
+        (
+            'Content-Disposition: form-data; name="image"; '
+            f'filename="{image_path.name}"\r\n'
+        ).encode("utf-8")
+    )
+    body.extend(b"Content-Type: application/octet-stream\r\n\r\n")
+    body.extend(image_path.read_bytes())
+    body.extend(f"\r\n--{boundary}--\r\n".encode())
+    request = urllib.request.Request(
+        f"{app['comfy_url'].rstrip('/')}/upload/image",
+        data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=app["request_timeout_seconds"]
+        ) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError) as exc:
+        raise CardGenError(f"入力画像をComfyUIへ送信できません: {exc}") from exc
+    name = result.get("name") if isinstance(result, dict) else None
+    subfolder = result.get("subfolder", "") if isinstance(result, dict) else ""
+    if not isinstance(name, str) or not name:
+        raise CardGenError(f"入力画像のアップロード応答が不正です: {result}")
+    return str(Path(subfolder) / name) if subfolder else name
+
+
 def sampler_nodes(workflow: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     result: list[tuple[str, dict[str, Any]]] = []
     for node_id, node in workflow.items():
         if isinstance(node, dict) and node.get("class_type") in SAMPLER_TYPES:
             result.append((str(node_id), node))
     if not result:
-        raise CardGenError("KSamplerまたはKSamplerAdvancedが見つかりません。")
+        raise CardGenError("対応済みSamplerが見つかりません。")
     return result
 
 
@@ -418,6 +474,60 @@ def set_all_sampler_prompts(
         sorted(negative_nodes),
         sorted(zeroed_negative_nodes),
     )
+
+
+def bound_node(
+    workflow: dict[str, Any], binding: dict[str, Any], label: str
+) -> tuple[str, dict[str, Any], str]:
+    node_id = str(binding.get("node_id", ""))
+    field = binding.get("field")
+    node = workflow.get(node_id)
+    if not node_id or not isinstance(node, dict) or not isinstance(field, str):
+        raise CardGenError(f"bindings.{label}が不正です。")
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict) or field not in inputs:
+        raise CardGenError(f"bindings.{label}の入力がありません: node {node_id}")
+    return node_id, node, field
+
+
+def set_bound_prompts(
+    workflow: dict[str, Any], bindings: dict[str, Any], positive: str, negative: str
+) -> tuple[list[str], list[str], list[str]]:
+    positive_binding = bindings.get("positive_prompt")
+    negative_binding = bindings.get("negative_prompt")
+    if not isinstance(positive_binding, dict) or not isinstance(negative_binding, dict):
+        raise CardGenError("bindingsのpositive_prompt/negative_promptが必要です。")
+    positive_id, positive_node, positive_field = bound_node(
+        workflow, positive_binding, "positive_prompt"
+    )
+    negative_id, negative_node, negative_field = bound_node(
+        workflow, negative_binding, "negative_prompt"
+    )
+    positive_node["inputs"][positive_field] = positive
+    negative_node["inputs"][negative_field] = negative
+    return [positive_id], [negative_id], []
+
+
+def set_bound_seed(
+    workflow: dict[str, Any], bindings: dict[str, Any], seed: int
+) -> tuple[str, str]:
+    binding = bindings.get("seed")
+    if not isinstance(binding, dict):
+        raise CardGenError("bindings.seedが必要です。")
+    node_id, node, field = bound_node(workflow, binding, "seed")
+    node["inputs"][field] = seed
+    return node_id, field
+
+
+def set_bound_input_image(
+    workflow: dict[str, Any], bindings: dict[str, Any], uploaded_name: str
+) -> str:
+    binding = bindings.get("input_image")
+    if not isinstance(binding, dict):
+        raise CardGenError("このプロファイルは入力画像に対応していません。")
+    node_id, node, field = bound_node(workflow, binding, "input_image")
+    node["inputs"][field] = uploaded_name
+    return node_id
 
 
 def detect_negative_mode(
@@ -650,16 +760,21 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(workflow_path, Path):
         raise CardGenError("workflow_pathが不正です。")
     workflow = load_json(workflow_path)
-
     approved = profile["approved_model_sets"]
     if not isinstance(approved, dict):
         raise CardGenError("approved_model_setsが不正です。")
     model_uses = verify_approved_models(workflow, approved)
 
     probe = copy.deepcopy(workflow)
-    positive_nodes, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
-        probe, "validation positive prompt", "validation negative prompt"
-    )
+    bindings = profile.get("bindings")
+    if isinstance(bindings, dict):
+        positive_nodes, negative_nodes, zeroed_negative_nodes = set_bound_prompts(
+            probe, bindings, "validation positive prompt", "validation negative prompt"
+        )
+    else:
+        positive_nodes, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
+            probe, "validation positive prompt", "validation negative prompt"
+        )
     negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
     sampler_count = len(sampler_nodes(workflow))
     # Sampler count alone cannot tell a refiner from a hires pass; it only says
@@ -680,8 +795,11 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             f"expected={expected_multi_pass}, detected={multi_pass_detected}"
         )
 
-    primary_id, primary_sampler = get_primary_sampler(probe)
-    seed_field = set_sampler_seed(primary_sampler, 1)
+    if isinstance(bindings, dict):
+        primary_id, seed_field = set_bound_seed(probe, bindings, 1)
+    else:
+        primary_id, primary_sampler = get_primary_sampler(probe)
+        seed_field = set_sampler_seed(primary_sampler, 1)
     set_save_prefix(probe, "CardGen/validation")
 
     return {
@@ -863,6 +981,7 @@ def command_generate(
     if not isinstance(workflow_path, Path):
         raise CardGenError("workflow_pathが不正です。")
     workflow = load_json(workflow_path)
+    bindings = profile.get("bindings")
 
     approved = profile["approved_model_sets"]
     if not isinstance(approved, dict):
@@ -903,9 +1022,14 @@ def command_generate(
     if not isinstance(negative, str):
         raise CardGenError("negative promptが不正です。")
 
-    _, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
-        workflow, args.prompt, negative
-    )
+    if isinstance(bindings, dict):
+        _, negative_nodes, zeroed_negative_nodes = set_bound_prompts(
+            workflow, bindings, args.prompt, negative
+        )
+    else:
+        _, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
+            workflow, args.prompt, negative
+        )
     negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
     if negative_mode in {"zeroed", "mixed"} and negative.strip():
         print(
@@ -917,8 +1041,19 @@ def command_generate(
     if not isinstance(output_dir, Path):
         raise CardGenError("output_dir_pathが不正です。")
 
-    primary_id, primary_sampler = get_primary_sampler(workflow)
-    set_sampler_seed(primary_sampler, 1)  # Validate before entering the loop.
+    if isinstance(bindings, dict):
+        primary_id, _ = set_bound_seed(workflow, bindings, 1)
+        if args.input_image is not None:
+            image_path = resolve_external_input_path(args.input_image)
+            uploaded_name = upload_input_image(app, image_path)
+            set_bound_input_image(workflow, bindings, uploaded_name)
+        elif "input_image" in bindings:
+            raise CardGenError("このプロファイルでは--input-imageが必要です。")
+    else:
+        if args.input_image is not None:
+            raise CardGenError("このプロファイルは--input-imageに対応していません。")
+        primary_id, primary_sampler = get_primary_sampler(workflow)
+        set_sampler_seed(primary_sampler, 1)  # Validate before entering the loop.
 
     timeout = (
         args.timeout
@@ -932,16 +1067,18 @@ def command_generate(
     session_stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     for index in range(args.count):
         current = copy.deepcopy(workflow)
-        current_primary = current.get(primary_id)
-        if not isinstance(current_primary, dict):
-            raise CardGenError(f"Primary samplerが不正です: {primary_id}")
-
         seed = (
             args.seed + index
             if args.seed is not None
             else secrets.randbelow(2**63 - 1)
         )
-        set_sampler_seed(current_primary, seed)
+        if isinstance(bindings, dict):
+            set_bound_seed(current, bindings, seed)
+        else:
+            current_primary = current.get(primary_id)
+            if not isinstance(current_primary, dict):
+                raise CardGenError(f"Primary samplerが不正です: {primary_id}")
+            set_sampler_seed(current_primary, seed)
 
         stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}_seed{seed}"
         set_save_prefix(current, f"CardGen/{profile['id']}/{session_stamp}/{stem}")
@@ -984,6 +1121,7 @@ def command_generate(
         "prompt": args.prompt,
         "negative": negative,
         "negative_prompt_mode": negative_mode,
+        "input_image_supplied": args.input_image is not None,
         "results": results,
     }
     metadata_path = output_dir / f"{profile['id']}_{session_stamp}_metadata.json"
@@ -1039,6 +1177,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--checkpoint",
         help="承認済みCheckpointへ全CheckpointLoaderを切り替える",
+    )
+    generate.add_argument(
+        "--input-image",
+        help="参照・編集入力画像（所有元プロジェクト内の絶対パス）",
     )
     generate.add_argument("--count", type=int, default=1, choices=range(1, 9))
     generate.add_argument("--seed", type=int)
