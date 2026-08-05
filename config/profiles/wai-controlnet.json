@@ -1,0 +1,34 @@
+{
+  "schema_version": 4,
+  "id": "wai-controlnet",
+  "display_name": "WAI Illustrious SDXL (Scribble ControlNet + Hires Fix)",
+  "workflow": "workflows/approved/wai_sdxl_controlnet_hires_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": true
+  },
+  "bindings": {
+    "positive_prompt": {"node_id": "6", "field": "text"},
+    "negative_prompt": {"node_id": "7", "field": "text"},
+    "seed": {"node_id": "10", "field": "seed"},
+    "input_image": {"node_id": "30", "field": "image"}
+  },
+  "approved_models": {
+    "checkpoints": ["waiIllustriousSDXL_v170.safetensors"],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": ["RealESRGAN_x4plus_anime_6B.pth"],
+    "controlnet": ["xinsir_controlnet_scribble_sdxl_v1.safetensors"]
+  },
+  "defaults": {
+    "negative_prompt": "bad quality, worst quality, worst detail, sketch, censor, low quality, lowres, blurry, jpeg artifacts, readable text, letters, logo, watermark, signature, extra fingers, missing fingers, fused fingers, malformed hands, deformed anatomy, duplicate person, multiple views, photorealistic, 3d render"
+  },
+  "_notes": [
+    "--input-image はラフ線画（scribble）を渡す。生成したい絵ではない。",
+    "ControlNet は base pass にのみ適用する。Hires pass は denoise 0.45 で",
+    "構造を保つため、二重に拘束すると線が硬くなる。",
+    "strength 0.75 / end_percent 0.7 は初期値。ラフの線が濃い場合は下げる。"
+  ]
+}

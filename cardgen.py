@@ -72,6 +72,8 @@ MODEL_INPUTS: dict[str, dict[str, str]] = {
     "LoraLoader": {"lora_name": "loras"},
     "LoraLoaderModelOnly": {"lora_name": "loras"},
     "UpscaleModelLoader": {"model_name": "upscale_models"},
+    "ControlNetLoader": {"control_net_name": "controlnet"},
+    "DiffControlNetLoader": {"control_net_name": "controlnet"},
 }
 
 # Prompt-bearing node types supported by the mutator.
@@ -326,6 +328,7 @@ def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
     result: dict[str, set[str]] = {}
     allowed_categories = {
         "checkpoints", "unet", "clip", "vae", "loras", "upscale_models",
+        "controlnet",
     }
     unknown = sorted(set(raw) - allowed_categories)
     if unknown:
