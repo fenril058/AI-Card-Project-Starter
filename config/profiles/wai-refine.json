@@ -1,0 +1,34 @@
+{
+  "schema_version": 4,
+  "id": "wai-refine",
+  "display_name": "WAI Illustrious SDXL (Upscale + Refine an existing image)",
+  "workflow": "workflows/approved/wai_sdxl_refine_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "bindings": {
+    "positive_prompt": {"node_id": "6", "field": "text"},
+    "negative_prompt": {"node_id": "7", "field": "text"},
+    "seed": {"node_id": "12", "field": "seed"},
+    "input_image": {"node_id": "30", "field": "image"}
+  },
+  "approved_models": {
+    "checkpoints": ["waiIllustriousSDXL_v170.safetensors"],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": ["RealESRGAN_x4plus_anime_6B.pth"]
+  },
+  "defaults": {
+    "negative_prompt": "bad quality, worst quality, worst detail, sketch, censor, low quality, lowres, blurry, jpeg artifacts, extra fingers, missing fingers, fused fingers, malformed hands, deformed anatomy, duplicate person, multiple views, photorealistic, 3d render"
+  },
+  "_notes": [
+    "既存の画像を印刷解像度へ引き上げ、ディテールだけを足す。構図は変えない。",
+    "--input-image は仕上げたい画像そのもの。ControlNet 用のラフではない。",
+    "出力は 1480x2016。入力の縦横比が違う場合は引き伸ばされるので、呼び出し側で",
+    "あらかじめ断ち切り比率へクロップしておくこと。",
+    "denoise 0.35 は構図を保つ上限に近い。上げると別の絵になる。"
+  ]
+}
