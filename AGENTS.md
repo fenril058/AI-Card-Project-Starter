@@ -52,3 +52,31 @@ uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
 - カード枠、カード名、ルール文章、ロゴ、印刷用文字組みは画像生成に含めず後工程で処理する。
 - Z-Image-Turboの標準プロファイルはnegativeを `ConditioningZeroOut` するため、独立したネガティブ文章を適用しない。
 - このリポジトリは公開可能な汎用パイプラインだけを保持する。原画、参照画像、生成物、ゲーム固有情報を追跡しない。
+
+## 実行記録（メタデータ）
+
+再現に必要な情報は `outputs/*_metadata.json` へ自動で残る。schema_version 5。
+
+- `workflow_sha256` / `queued_workflow_sha256` — 前者はファイル、後者は実際に
+  送信したグラフ。ワークフローを書き換えて比較実験をした場合、この2つが
+  なければ後から群を区別できない。
+- `generation_settings.node_inputs` — 全ノードのリテラル入力
+- `model_files` — 使用した重みファイルのSHA-256とサイズ
+- `comfyui` — ComfyUI・Python・PyTorchのバージョン
+- `results[].file_sha256` — 出力画像のSHA-256
+- `app_config_sha256` / `profile_sha256` / `input_image_sha256`
+
+**`snapshot_node_inputs()` はノード種別を列挙しない。** 全ノードのリテラル入力を
+記録する。列挙方式にすると `SamplerCustomAdvanced` のように設定を自前で持たない
+ノードを使うワークフローで cfg・steps・sampler がまるごと記録から抜ける。
+FLUX.2のグラフで実際に抜けていた。新しいノード種別を足すたびに同じ穴が空く方式は
+採用しない。
+
+記録対象外は3つ。プロンプト本文（`prompt`/`negative` に別途ある）、seed
+（`results` にある。テンプレート側の値は古いため記録すると誤解を招く）、
+入力画像名（呼び出し元のprivateプロジェクトに属する）。
+
+`model_files` のハッシュには ComfyUI の models ディレクトリが必要。パスは
+マシン固有なので、コミットされる `config/app.json` ではなく環境変数
+`CARDGEN_COMFYUI_MODELS_DIR` で渡す。未設定なら空リストになり生成は続行する。
+ハッシュは `.cache/model-hashes.json` に (size, mtime) で キャッシュする。

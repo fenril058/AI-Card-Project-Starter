@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import hashlib
 import json
+import os
 import re
 import secrets
 import sys
@@ -126,6 +128,100 @@ def project_relative(path: Path) -> str:
     return str(path.resolve().relative_to(PROJECT_DIR))
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_json(value: Any) -> str:
+    """Hash a graph by content, independent of key order and whitespace."""
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# Approval category -> ComfyUI model folders, in search order. ComfyUI accepts
+# several names per category (unet/diffusion_models, clip/text_encoders) and a
+# portable install usually has both directories present but only one populated.
+MODEL_DIR_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "checkpoints": ("checkpoints", "Stable-Diffusion"),
+    "unet": ("diffusion_models", "unet"),
+    "clip": ("text_encoders", "clip"),
+    "vae": ("vae",),
+    "loras": ("loras", "Lora"),
+    "upscale_models": ("upscale_models",),
+    "controlnet": ("controlnet",),
+}
+
+
+def hash_model_files(
+    models_dir: Path | None, model_uses: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Hash the weight files a run actually loaded.
+
+    A filename does not pin a model: replacing the file under the same name
+    silently changes every later result. Hashing is cached on (size, mtime)
+    because checkpoints are multi-gigabyte and a batch would otherwise re-read
+    them on every run.
+    """
+    records: list[dict[str, Any]] = []
+    if models_dir is None:
+        return records
+
+    cache_path = PROJECT_DIR / ".cache" / "model-hashes.json"
+    try:
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    dirty = False
+
+    for use in model_uses:
+        category, filename = use.get("category"), use.get("filename")
+        if not isinstance(category, str) or not isinstance(filename, str):
+            continue
+        entry: dict[str, Any] = {"category": category, "filename": filename}
+        path = None
+        for folder in MODEL_DIR_CANDIDATES.get(category, (category,)):
+            candidate = models_dir / folder / filename
+            if candidate.is_file():
+                path = candidate
+                break
+        if path is None:
+            entry["sha256"] = None
+            entry["note"] = "file not found under comfyui_models_dir"
+            records.append(entry)
+            continue
+        entry["folder"] = path.parent.name
+        stat = path.stat()
+        key = f"{path.parent.name}/{filename}"
+        cached = cache.get(key)
+        if (
+            isinstance(cached, dict)
+            and cached.get("size") == stat.st_size
+            and cached.get("mtime_ns") == stat.st_mtime_ns
+        ):
+            entry["sha256"] = cached.get("sha256")
+        else:
+            entry["sha256"] = sha256_file(path)
+            cache[key] = {
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "sha256": entry["sha256"],
+            }
+            dirty = True
+        entry["size"] = stat.st_size
+        records.append(entry)
+
+    if dirty:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    return records
+
+
 def validate_local_url(base_url: str) -> None:
     parsed = urllib.parse.urlparse(base_url)
     if (
@@ -184,6 +280,24 @@ def load_app_config(path: Path) -> dict[str, Any]:
         if not isinstance(value, int) or value < 1:
             raise CardGenError(f"{key}は1以上の整数で指定してください。")
         app[key] = value
+
+    # Optional. Without it a run records model filenames but cannot prove which
+    # bytes were loaded. ComfyUI lives outside this project, so the value is an
+    # absolute machine-specific path and belongs in the environment rather than
+    # in the committed config.
+    models_dir = os.environ.get("CARDGEN_COMFYUI_MODELS_DIR") or app.get(
+        "comfyui_models_dir"
+    )
+    app["comfyui_models_dir_path"] = None
+    if models_dir is not None:
+        if not isinstance(models_dir, str) or not models_dir.strip():
+            raise CardGenError("comfyui_models_dirは非空の文字列で指定してください。")
+        resolved = Path(models_dir).expanduser()
+        if not resolved.is_absolute():
+            raise CardGenError("comfyui_models_dirは絶対パスで指定してください。")
+        if not resolved.is_dir():
+            raise CardGenError(f"comfyui_models_dirが存在しません: {resolved}")
+        app["comfyui_models_dir_path"] = resolved
 
     return app
 
@@ -709,7 +823,52 @@ def describe_generation_settings(workflow: dict[str, Any]) -> dict[str, Any]:
     return {
         "latents": sorted(latents, key=lambda item: item["node_id"]),
         "samplers": sorted(samplers, key=lambda item: item["node_id"]),
+        "node_inputs": snapshot_node_inputs(workflow),
     }
+
+
+def snapshot_node_inputs(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Record every literal input of every node in the queued graph.
+
+    Enumerating "interesting" node types is what made this record useless for
+    the FLUX.2 graph: SamplerCustomAdvanced holds no settings of its own, so
+    cfg (CFGGuider), steps (Flux2Scheduler) and sampler_name (KSamplerSelect)
+    were all absent from metadata while appearing nowhere else. Any node type
+    added later would have hit the same gap.
+
+    Links are ``[node_id, slot]`` lists and are skipped; the graph structure is
+    already pinned by the workflow hash.
+
+    Three kinds of field are withheld:
+
+    - prompt text, recorded separately and would double the file
+    - seed, which varies per result and is authoritative in ``results``; the
+      template value here would be a stale default
+    - the input image name, which belongs to the caller's private project
+    """
+    snapshot: dict[str, Any] = {}
+    for node_id, node in sorted(workflow.items(), key=lambda item: str(item[0])):
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        class_type = str(node.get("class_type"))
+        withheld = set(PROMPT_FIELDS.get(class_type, ()))
+        withheld.update({"seed", "noise_seed"})
+        if class_type in {"LoadImage", "LoadImageMask"}:
+            withheld.add("image")
+        literals = {
+            field: value
+            for field, value in sorted(inputs.items())
+            if not isinstance(value, (list, dict)) and field not in withheld
+        }
+        if literals:
+            snapshot[str(node_id)] = {
+                "class_type": node.get("class_type"),
+                "inputs": literals,
+            }
+    return snapshot
 
 
 def get_primary_sampler(workflow: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -937,6 +1096,26 @@ def command_profiles(app: dict[str, Any]) -> int:
     return 0
 
 
+def comfy_versions(app: dict[str, Any]) -> dict[str, Any]:
+    """Record the engine version. A ComfyUI update can change node behaviour."""
+    try:
+        stats = request_json(
+            app["comfy_url"],
+            "GET",
+            "/system_stats",
+            timeout=app["request_timeout_seconds"],
+        )
+    except CardGenError:
+        return {"comfyui_version": None, "note": "/system_stats unavailable"}
+    system = stats.get("system", {}) if isinstance(stats, dict) else {}
+    return {
+        "comfyui_version": system.get("comfyui_version"),
+        "python_version": system.get("python_version"),
+        "pytorch_version": system.get("pytorch_version"),
+        "comfy_package_versions": system.get("comfy_package_versions"),
+    }
+
+
 def command_check(app: dict[str, Any]) -> int:
     stats = request_json(
         app["comfy_url"],
@@ -1096,19 +1275,28 @@ def command_generate(
                 "prompt_id": prompt_id,
                 "seed": seed,
                 "files": [project_relative(path) for path in files],
+                "file_sha256": [sha256_file(path) for path in files],
+                # The graph as queued, per seed. Two runs that differ only in a
+                # workflow edit are otherwise indistinguishable in the record.
+                "queued_workflow_sha256": sha256_json(current),
             }
         )
         for path in files:
             print(f"RESULT: {path}")
 
     metadata = {
-        "schema_version": 4,
+        "schema_version": 5,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "app_config": project_relative(app["app_config_path"]),
+        "app_config_sha256": sha256_file(app["app_config_path"]),
         "profile": profile["id"],
         "profile_file": project_relative(profile["profile_path"]),
+        "profile_sha256": sha256_file(profile["profile_path"]),
         "workflow": project_relative(workflow_path),
+        "workflow_sha256": sha256_file(workflow_path),
+        "comfyui": comfy_versions(app),
         "model_uses": model_uses,
+        "model_files": hash_model_files(app["comfyui_models_dir_path"], model_uses),
         "checkpoint_override": args.checkpoint,
         "checkpoint_nodes": checkpoint_nodes,
         "generation_settings": describe_generation_settings(workflow),
@@ -1122,6 +1310,11 @@ def command_generate(
         "negative": negative,
         "negative_prompt_mode": negative_mode,
         "input_image_supplied": args.input_image is not None,
+        # Hash only. The path belongs to the caller's private project and must
+        # not be written into this repository's metadata.
+        "input_image_sha256": (
+            sha256_file(Path(args.input_image)) if args.input_image else None
+        ),
         "results": results,
     }
     metadata_path = output_dir / f"{profile['id']}_{session_stamp}_metadata.json"

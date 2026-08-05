@@ -113,5 +113,67 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(workflow["3"]["inputs"]["noise_seed"], 42)
 
 
+class NodeInputSnapshotTests(unittest.TestCase):
+    """The FLUX.2 graph keeps every sampler setting on a separate node."""
+
+    WORKFLOW = {
+        "61": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "62": {
+            "class_type": "Flux2Scheduler",
+            "inputs": {"steps": 28, "width": 1024, "height": 1344},
+        },
+        "63": {
+            "class_type": "CFGGuider",
+            "inputs": {"model": ["70", 0], "positive": ["77", 0], "cfg": 5.0},
+        },
+        "64": {
+            "class_type": "SamplerCustomAdvanced",
+            "inputs": {"noise": ["73", 0], "guider": ["63", 0]},
+        },
+        "73": {"class_type": "RandomNoise", "inputs": {"noise_seed": 1}},
+        "74": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["71", 0], "text": "secret"},
+        },
+        "82": {"class_type": "LoadImage", "inputs": {"image": "private-reference.jpg"}},
+    }
+
+    def snapshot(self) -> dict:
+        return cardgen.snapshot_node_inputs(copy.deepcopy(self.WORKFLOW))
+
+    def test_settings_on_helper_nodes_are_recorded(self) -> None:
+        snapshot = self.snapshot()
+        self.assertEqual(snapshot["63"]["inputs"]["cfg"], 5.0)
+        self.assertEqual(snapshot["62"]["inputs"]["steps"], 28)
+        self.assertEqual(snapshot["61"]["inputs"]["sampler_name"], "euler")
+
+    def test_links_are_not_recorded_as_settings(self) -> None:
+        snapshot = self.snapshot()
+        self.assertNotIn("64", snapshot)
+        self.assertNotIn("model", snapshot["63"]["inputs"])
+
+    def test_prompt_seed_and_input_image_are_withheld(self) -> None:
+        snapshot = self.snapshot()
+        serialised = json.dumps(snapshot)
+        self.assertNotIn("74", snapshot)
+        self.assertNotIn("82", snapshot)
+        self.assertNotIn("73", snapshot)
+        self.assertNotIn("secret", serialised)
+        self.assertNotIn("private-reference.jpg", serialised)
+
+    def test_graph_hash_is_order_independent(self) -> None:
+        reordered = dict(reversed(list(self.WORKFLOW.items())))
+        self.assertEqual(
+            cardgen.sha256_json(self.WORKFLOW), cardgen.sha256_json(reordered)
+        )
+
+    def test_graph_hash_changes_when_a_setting_changes(self) -> None:
+        edited = copy.deepcopy(self.WORKFLOW)
+        edited["63"]["inputs"]["cfg"] = 3.5
+        self.assertNotEqual(
+            cardgen.sha256_json(self.WORKFLOW), cardgen.sha256_json(edited)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
