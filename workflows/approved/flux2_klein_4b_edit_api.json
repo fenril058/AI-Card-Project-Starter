@@ -9,7 +9,7 @@
   "78": {"class_type": "VAEEncode", "inputs": {"pixels": ["80", 0], "vae": ["72", 0]}},
   "77": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["74", 0], "latent": ["78", 0]}},
   "76": {"class_type": "ReferenceLatent", "inputs": {"conditioning": ["67", 0], "latent": ["78", 0]}},
-  "63": {"class_type": "CFGGuider", "inputs": {"model": ["70", 0], "positive": ["77", 0], "negative": ["76", 0], "cfg": 3.5}},
+  "63": {"class_type": "CFGGuider", "inputs": {"model": ["70", 0], "positive": ["77", 0], "negative": ["76", 0], "cfg": 5.0}},
   "61": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
   "62": {"class_type": "Flux2Scheduler", "inputs": {"steps": 28, "width": 1024, "height": 1344}},
   "73": {"class_type": "RandomNoise", "inputs": {"noise_seed": 0}},
