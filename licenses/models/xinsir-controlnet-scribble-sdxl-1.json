@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "xinsir-controlnet-scribble-sdxl-1",
   "asset_type": "controlnet",
-  "generated_at": "2026-08-06T14:31:47Z",
+  "generated_at": "2026-08-06T15:28:23Z",
   "identity": {
     "name": "xinsir ControlNet Scribble SDXL 1.0",
     "version_name": "1.0"
@@ -14,7 +14,7 @@
     "provider_model_id": "xinsir/controlnet-scribble-sdxl-1.0",
     "provider_version_id": null,
     "revision": "0bed4973b80c2329f76e0abf4196c51dfbf9108c",
-    "retrieved_at": "2026-08-06T23:31:47+09:00"
+    "retrieved_at": "2026-08-07T00:28:23+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -25,13 +25,14 @@
     "download_url": "https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/resolve/0bed4973b80c2329f76e0abf4196c51dfbf9108c/diffusion_pytorch_model.safetensors",
     "provider_size_bytes": 2502139104,
     "configured_path": "models/controlnet/xinsir_controlnet_scribble_sdxl_v1.safetensors",
-    "exists": false,
-    "size_bytes": null,
-    "sha256": null,
+    "exists": true,
+    "size_bytes": 2502139104,
+    "sha256": "B3E4AC47BC814019D50DC842F579301440DEB6D8F09EE1B91A30F527ACE1B852",
     "weights_sha256": null,
     "provider_sha256": "B3E4AC47BC814019D50DC842F579301440DEB6D8F09EE1B91A30F527ACE1B852",
     "provider_weights_sha256": null,
-    "verification": "local_file_missing"
+    "expected_sha256": null,
+    "verification": "exact_file_match"
   },
   "license": {
     "declared": null,

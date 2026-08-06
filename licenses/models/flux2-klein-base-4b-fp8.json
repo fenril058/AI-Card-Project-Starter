@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "flux2-klein-base-4b-fp8",
   "asset_type": "diffusion_model",
-  "generated_at": "2026-08-06T14:31:48Z",
+  "generated_at": "2026-08-06T15:28:27Z",
   "identity": {
     "name": "FLUX.2 Klein Base 4B FP8",
     "version_name": "main"
@@ -14,7 +14,7 @@
     "provider_model_id": "black-forest-labs/FLUX.2-klein-base-4b-fp8",
     "provider_version_id": null,
     "revision": "103db268c10d4d3921101b46057671f9ac460da6",
-    "retrieved_at": "2026-08-06T23:31:48+09:00"
+    "retrieved_at": "2026-08-07T00:28:27+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -25,13 +25,14 @@
     "download_url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4b-fp8/resolve/103db268c10d4d3921101b46057671f9ac460da6/flux-2-klein-base-4b-fp8.safetensors",
     "provider_size_bytes": 4089498488,
     "configured_path": "models/diffusion_models/flux-2-klein-base-4b-fp8.safetensors",
-    "exists": false,
-    "size_bytes": null,
-    "sha256": null,
+    "exists": true,
+    "size_bytes": 4089498488,
+    "sha256": "44BAB3A86FE98B85D21DD2A4729EBDC3AE51FB8A39F76E457E18C724219E6840",
     "weights_sha256": null,
     "provider_sha256": "44BAB3A86FE98B85D21DD2A4729EBDC3AE51FB8A39F76E457E18C724219E6840",
     "provider_weights_sha256": null,
-    "verification": "local_file_missing"
+    "expected_sha256": null,
+    "verification": "exact_file_match"
   },
   "license": {
     "declared": null,

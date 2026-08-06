@@ -14,6 +14,7 @@ from .errors import LicenseManagerError
 from .io import (
     normalize_sha256,
     normalize_weights_sha256,
+    resolve_model_path,
     resolve_path,
     safetensors_weights_sha256,
     sha256_file,
@@ -269,7 +270,7 @@ class LicenseService:
                     f"{item.get('path')}"
                 )
 
-        local_path = resolve_path(
+        local_path = resolve_model_path(
             self.repository_root,
             asset.local_path,
         )

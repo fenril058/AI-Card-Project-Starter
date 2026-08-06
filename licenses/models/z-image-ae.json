@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "z-image-ae",
   "asset_type": "vae",
-  "generated_at": "2026-08-06T14:31:47Z",
+  "generated_at": "2026-08-06T15:28:19Z",
   "identity": {
     "name": "Z-Image AE",
     "version_name": "main"
@@ -14,7 +14,7 @@
     "provider_model_id": "Comfy-Org/z_image_turbo",
     "provider_version_id": null,
     "revision": "d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e",
-    "retrieved_at": "2026-08-06T23:31:47+09:00"
+    "retrieved_at": "2026-08-07T00:28:19+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -25,13 +25,14 @@
     "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/vae/ae.safetensors",
     "provider_size_bytes": 335304388,
     "configured_path": "models/vae/ae.safetensors",
-    "exists": false,
-    "size_bytes": null,
-    "sha256": null,
-    "weights_sha256": null,
+    "exists": true,
+    "size_bytes": 335304388,
+    "sha256": "AFC8E28272CD15DB3919BACDB6918CE9C1ED22E96CB12C4D5ED0FBA823529E38",
+    "weights_sha256": "DDEC9C299F56C1178E6281A12167F2EBEC9AA4DE8FCE81E234A687BB231D5B6D",
     "provider_sha256": "AFC8E28272CD15DB3919BACDB6918CE9C1ED22E96CB12C4D5ED0FBA823529E38",
     "provider_weights_sha256": null,
-    "verification": "local_file_missing"
+    "expected_sha256": null,
+    "verification": "exact_file_match"
   },
   "license": {
     "declared": null,

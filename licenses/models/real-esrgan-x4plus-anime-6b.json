@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "real-esrgan-x4plus-anime-6b",
   "asset_type": "upscale_model",
-  "generated_at": "2026-08-06T15:00:19Z",
+  "generated_at": "2026-08-06T15:28:20Z",
   "identity": {
     "name": "Real-ESRGAN x4plus anime 6B",
     "version_name": "v0.2.2.4"
@@ -14,7 +14,7 @@
     "provider_model_id": "xinntao/Real-ESRGAN",
     "provider_version_id": 48759268,
     "revision": "v0.2.2.4",
-    "retrieved_at": "2026-08-07T00:00:19+09:00"
+    "retrieved_at": "2026-08-07T00:28:20+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -25,14 +25,14 @@
     "download_url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
     "provider_size_bytes": 17938799,
     "configured_path": "models/upscale_models/RealESRGAN_x4plus_anime_6B.pth",
-    "exists": false,
-    "size_bytes": null,
-    "sha256": null,
+    "exists": true,
+    "size_bytes": 17938799,
+    "sha256": "F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA",
     "weights_sha256": null,
     "provider_sha256": null,
     "provider_weights_sha256": null,
     "expected_sha256": "F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA",
-    "verification": "local_file_missing"
+    "verification": "exact_file_match"
   },
   "license": {
     "declared": "BSD-3-Clause",

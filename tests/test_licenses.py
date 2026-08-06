@@ -1,13 +1,16 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from licenses.io import safetensors_weights_sha256
+from licenses.io import resolve_model_path, safetensors_weights_sha256
 from licenses.providers import configured_sha256
 from licenses.records import inspect_local_file
 from licenses.registry import Asset, Registry, Source
 from licenses.report import render_readme
+from project_env import load_project_env
 
 
 class LicenseHashTest(unittest.TestCase):
@@ -64,6 +67,7 @@ class LicenseHashTest(unittest.TestCase):
             )
 
             self.assertEqual(result["verification"], "weights_match")
+            self.assertEqual(result["configured_path"], str(model).replace("\\", "/"))
 
 
 class LicenseCoverageTest(unittest.TestCase):
@@ -117,6 +121,43 @@ class LicenseCoverageTest(unittest.TestCase):
             ),
         )
         self.assertEqual(configured_sha256(asset), ("EF" * 32))
+
+
+class ProjectEnvironmentTest(unittest.TestCase):
+    def test_dotenv_loads_models_dir_without_overriding_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                'CARDGEN_COMFYUI_MODELS_DIR="C:\\\\ComfyUI\\\\models"\n',
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                load_project_env(env_file)
+                self.assertEqual(
+                    os.environ["CARDGEN_COMFYUI_MODELS_DIR"],
+                    "C:\\\\ComfyUI\\\\models",
+                )
+                os.environ["CARDGEN_COMFYUI_MODELS_DIR"] = "D:\\existing"
+                load_project_env(env_file)
+                self.assertEqual(
+                    os.environ["CARDGEN_COMFYUI_MODELS_DIR"],
+                    "D:\\existing",
+                )
+
+    def test_registry_model_path_uses_comfyui_models_root(self) -> None:
+        models_dir = Path("C:/ComfyUI/models")
+        with patch.dict(
+            os.environ,
+            {"CARDGEN_COMFYUI_MODELS_DIR": str(models_dir)},
+        ):
+            resolved = resolve_model_path(
+                Path("C:/project"),
+                "models/checkpoints/model.safetensors",
+            )
+        self.assertEqual(
+            resolved,
+            models_dir / "checkpoints" / "model.safetensors",
+        )
 
 
 if __name__ == "__main__":

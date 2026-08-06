@@ -120,6 +120,26 @@ def resolve_path(repository_root: Path, value: str | None) -> Path | None:
     return path if path.is_absolute() else repository_root / path
 
 
+def resolve_model_path(repository_root: Path, value: str | None) -> Path | None:
+    """Resolve registry models/... paths through the configured ComfyUI root."""
+    if not value:
+        return None
+    path = Path(value)
+    if path.is_absolute():
+        return path
+
+    configured = os.environ.get("CARDGEN_COMFYUI_MODELS_DIR")
+    if configured and path.parts and path.parts[0].lower() == "models":
+        models_dir = Path(configured).expanduser()
+        if not models_dir.is_absolute():
+            raise LicenseManagerError(
+                "CARDGEN_COMFYUI_MODELS_DIR must be an absolute path"
+            )
+        return models_dir.joinpath(*path.parts[1:])
+
+    return repository_root / path
+
+
 def display_path(repository_root: Path, path: Path) -> str:
     try:
         return path.relative_to(repository_root).as_posix()

@@ -27,6 +27,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from project_env import ProjectEnvError, load_project_env
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_APP_CONFIG = PROJECT_DIR / "config" / "app.json"
@@ -1455,6 +1457,7 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
+        load_project_env(PROJECT_DIR / ".env")
         app_path = resolve_project_path(args.app_config)
         app = load_app_config(app_path)
         if args.profile is not None:
@@ -1469,7 +1472,7 @@ def main() -> int:
         if args.command == "generate":
             return command_generate(args, app, args.profile)
         parser.error("unknown command")
-    except CardGenError as exc:
+    except (CardGenError, ProjectEnvError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 1

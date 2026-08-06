@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from project_env import ProjectEnvError, load_project_env
+
 from .errors import LicenseManagerError
 from .service import LicenseService
 
@@ -98,9 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    service = LicenseService(Path(args.root))
+    root = Path(args.root).resolve()
 
     try:
+        load_project_env(root / ".env")
+        service = LicenseService(root)
         if args.command == "sync":
             service.sync(
                 asset_ids=args.asset,
@@ -123,7 +127,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             parser.error(f"Unknown command: {args.command}")
 
-    except LicenseManagerError as exc:
+    except (LicenseManagerError, ProjectEnvError) as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "qwen-3-4b",
   "asset_type": "text_encoder",
-  "generated_at": "2026-08-06T14:31:46Z",
+  "generated_at": "2026-08-06T15:28:19Z",
   "identity": {
     "name": "Qwen 3 4B",
     "version_name": "main"
@@ -14,7 +14,7 @@
     "provider_model_id": "Comfy-Org/z_image_turbo",
     "provider_version_id": null,
     "revision": "d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e",
-    "retrieved_at": "2026-08-06T23:31:46+09:00"
+    "retrieved_at": "2026-08-07T00:28:19+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -25,13 +25,14 @@
     "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/text_encoders/qwen_3_4b.safetensors",
     "provider_size_bytes": 8044982048,
     "configured_path": "models/text_encoders/qwen_3_4b.safetensors",
-    "exists": false,
-    "size_bytes": null,
-    "sha256": null,
+    "exists": true,
+    "size_bytes": 8044982048,
+    "sha256": "6C671498573AC2F7A5501502CCCE8D2B08EA6CA2F661C458E708F36B36EDFC5A",
     "weights_sha256": null,
     "provider_sha256": "6C671498573AC2F7A5501502CCCE8D2B08EA6CA2F661C458E708F36B36EDFC5A",
     "provider_weights_sha256": null,
-    "verification": "local_file_missing"
+    "expected_sha256": null,
+    "verification": "exact_file_match"
   },
   "license": {
     "declared": null,

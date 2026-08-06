@@ -18,6 +18,7 @@ from .io import (
     display_path,
     normalize_sha256,
     normalize_weights_sha256,
+    resolve_model_path,
     resolve_path,
     safetensors_weights_sha256,
     sha256_file,
@@ -44,7 +45,12 @@ def inspect_local_file(
     *,
     skip_hash: bool,
 ) -> dict[str, Any]:
-    local_path = resolve_path(
+    configured_path = (
+        Path(asset.local_path).as_posix()
+        if asset.local_path
+        else None
+    )
+    local_path = resolve_model_path(
         repository_root,
         asset.local_path,
     )
@@ -61,7 +67,7 @@ def inspect_local_file(
 
     if local_path is None:
         return {
-            "configured_path": None,
+            "configured_path": configured_path,
             "exists": False,
             "size_bytes": None,
             "sha256": None,
@@ -78,10 +84,7 @@ def inspect_local_file(
 
     if not local_path.exists():
         return {
-            "configured_path": display_path(
-                repository_root,
-                local_path,
-            ),
+            "configured_path": configured_path,
             "exists": False,
             "size_bytes": None,
             "sha256": None,
@@ -120,10 +123,7 @@ def inspect_local_file(
         verification = "exact_file_mismatch"
 
     return {
-        "configured_path": display_path(
-            repository_root,
-            local_path,
-        ),
+        "configured_path": configured_path,
         "exists": True,
         "size_bytes": local_path.stat().st_size,
         "sha256": local_sha256,
