@@ -61,7 +61,7 @@ uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
   送信したグラフ。ワークフローを書き換えて比較実験をした場合、この2つが
   なければ後から群を区別できない。
 - `generation_settings.node_inputs` — 全ノードのリテラル入力
-- `model_files` — 使用した重みファイルのSHA-256とサイズ
+- `model_files` — 使用した重みファイルのSHA-256とサイズ、および `weights_sha256`
 - `comfyui` — ComfyUI・Python・PyTorchのバージョン
 - `results[].file_sha256` — 出力画像のSHA-256
 - `app_config_sha256` / `profile_sha256` / `input_image_sha256`
@@ -80,3 +80,22 @@ FLUX.2のグラフで実際に抜けていた。新しいノード種別を足�
 マシン固有なので、コミットされる `config/app.json` ではなく環境変数
 `CARDGEN_COMFYUI_MODELS_DIR` で渡す。未設定なら空リストになり生成は続行する。
 ハッシュは `.cache/model-hashes.json` に (size, mtime) で キャッシュする。
+
+### ファイル全体のSHA-256でモデルを同定しないこと
+
+`sha256` はファイル全体のハッシュで、**safetensorsヘッダのパディング1つで変わる**。
+WAI v17 を Civitai からダウンロードしたファイルは、Civitai が掲載している
+SHA-256 と一致しないが、重みは同一だった。差はヘッダの `__spacer` フィールド。
+
+配布元と突き合わせるときは `weights_sha256` を使う。safetensors ヘッダの
+`modelspec.hash_sha256` から読み、Civitai の `AutoV3` と直接比較できる。
+`0x` 接頭辞は正規化して除去してある。
+
+`safetensors_weight_identity()` は例外を投げない。modelspec を持たない
+safetensors、`.pth` のような別形式、壊れたヘッダはすべて `null` を返す。
+**持っていない情報を持っているかのように記録しない**ため。生成は止めない。
+
+用途の使い分け:
+
+- `sha256` — 同じファイルで再現したかの判定に使う
+- `weights_sha256` — 配布元との同一性の主張に使う

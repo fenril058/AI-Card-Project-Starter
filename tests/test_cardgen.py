@@ -113,6 +113,67 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(workflow["3"]["inputs"]["noise_seed"], 42)
 
 
+class WeightIdentityTests(unittest.TestCase):
+    """Whole-file SHA-256 changes with header padding; the weights hash does not."""
+
+    @staticmethod
+    def write_safetensors(path: Path, metadata: dict | None, padding: int = 0) -> None:
+        header: dict = {"a": {"dtype": "F16", "shape": [1], "data_offsets": [0, 2]}}
+        if metadata is not None:
+            header["__metadata__"] = metadata
+        blob = json.dumps(header).encode("utf-8") + b" " * padding
+        path.write_bytes(len(blob).to_bytes(8, "little") + blob + b"\x00\x00")
+
+    def test_reads_the_declared_weight_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.safetensors"
+            self.write_safetensors(
+                path,
+                {
+                    "modelspec.hash_sha256": "0xABC123",
+                    "modelspec.title": "example_v1",
+                },
+            )
+            identity = cardgen.safetensors_weight_identity(path)
+        # Normalised: distributors write it both with and without the prefix.
+        self.assertEqual(identity["weights_sha256"], "abc123")
+        self.assertEqual(identity["modelspec_title"], "example_v1")
+
+    def test_padding_changes_the_file_hash_but_not_the_weight_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = Path(tmp) / "plain.safetensors"
+            padded = Path(tmp) / "padded.safetensors"
+            metadata = {"modelspec.hash_sha256": "0xDEADBEEF"}
+            self.write_safetensors(plain, metadata)
+            self.write_safetensors(padded, metadata, padding=4096)
+
+            self.assertNotEqual(cardgen.sha256_file(plain), cardgen.sha256_file(padded))
+            self.assertEqual(
+                cardgen.safetensors_weight_identity(plain)["weights_sha256"],
+                cardgen.safetensors_weight_identity(padded)["weights_sha256"],
+            )
+
+    def test_missing_metadata_and_other_formats_are_not_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bare = Path(tmp) / "bare.safetensors"
+            self.write_safetensors(bare, None)
+            self.assertIsNone(
+                cardgen.safetensors_weight_identity(bare)["weights_sha256"]
+            )
+
+            checkpoint = Path(tmp) / "upscaler.pth"
+            checkpoint.write_bytes(b"not safetensors")
+            self.assertIsNone(
+                cardgen.safetensors_weight_identity(checkpoint)["weights_sha256"]
+            )
+
+            truncated = Path(tmp) / "truncated.safetensors"
+            truncated.write_bytes(b"\x04")
+            self.assertIsNone(
+                cardgen.safetensors_weight_identity(truncated)["weights_sha256"]
+            )
+
+
 class NodeInputSnapshotTests(unittest.TestCase):
     """The FLUX.2 graph keeps every sampler setting on a separate node."""
 

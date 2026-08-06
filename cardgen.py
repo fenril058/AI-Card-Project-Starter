@@ -144,6 +144,55 @@ def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+# A safetensors header is a little-endian u64 length followed by that many bytes
+# of JSON. Anything larger than this is not a header we should try to parse.
+SAFETENSORS_HEADER_LIMIT = 64 * 1024 * 1024
+
+
+def safetensors_weight_identity(path: Path) -> dict[str, Any]:
+    """Read the weight identity a safetensors file declares about itself.
+
+    Whole-file SHA-256 does not identify a model. WAI v17 downloaded from
+    Civitai hashes differently from the file Civitai lists, purely because the
+    header carries an extra padding field — the weights are identical. Comparing
+    whole-file hashes against a distributor therefore produces false alarms.
+
+    ``modelspec.hash_sha256`` covers the tensor data only, and matches Civitai's
+    AutoV3, so it is the field that can be checked against a distributor.
+
+    Returns empty values rather than raising: a missing or unusual header must
+    not stop a generation run.
+    """
+    identity: dict[str, Any] = {"weights_sha256": None, "modelspec_title": None}
+    if path.suffix.lower() != ".safetensors":
+        return identity
+    try:
+        with path.open("rb") as handle:
+            raw_length = handle.read(8)
+            if len(raw_length) < 8:
+                return identity
+            length = int.from_bytes(raw_length, "little")
+            if not 0 < length <= SAFETENSORS_HEADER_LIMIT:
+                return identity
+            header = json.loads(handle.read(length))
+    except (OSError, ValueError):
+        return identity
+
+    metadata = header.get("__metadata__")
+    if not isinstance(metadata, dict):
+        return identity
+
+    declared = metadata.get("modelspec.hash_sha256")
+    if isinstance(declared, str) and declared:
+        # Distributors write it with and without the 0x prefix; normalise so the
+        # recorded value can be compared directly.
+        identity["weights_sha256"] = declared.removeprefix("0x").lower()
+    title = metadata.get("modelspec.title")
+    if isinstance(title, str) and title:
+        identity["modelspec_title"] = title
+    return identity
+
+
 # Approval category -> ComfyUI model folders, in search order. ComfyUI accepts
 # several names per category (unet/diffusion_models, clip/text_encoders) and a
 # portable install usually has both directories present but only one populated.
@@ -203,14 +252,20 @@ def hash_model_files(
             isinstance(cached, dict)
             and cached.get("size") == stat.st_size
             and cached.get("mtime_ns") == stat.st_mtime_ns
+            and "weights_sha256" in cached
         ):
             entry["sha256"] = cached.get("sha256")
+            entry["weights_sha256"] = cached.get("weights_sha256")
+            entry["modelspec_title"] = cached.get("modelspec_title")
         else:
             entry["sha256"] = sha256_file(path)
+            entry.update(safetensors_weight_identity(path))
             cache[key] = {
                 "size": stat.st_size,
                 "mtime_ns": stat.st_mtime_ns,
                 "sha256": entry["sha256"],
+                "weights_sha256": entry["weights_sha256"],
+                "modelspec_title": entry["modelspec_title"],
             }
             dirty = True
         entry["size"] = stat.st_size
