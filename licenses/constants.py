@@ -1,5 +1,5 @@
-SCHEMA_VERSION = "1.0.0"
-USER_AGENT = "AI-Card-Project-LicenseManager/1.0"
+SCHEMA_VERSION = "1.1.0"
+USER_AGENT = "AI-Card-Project-LicenseManager/1.1"
 CHUNK_SIZE = 8 * 1024 * 1024
 
 VALID_REVIEW_STATUSES = {

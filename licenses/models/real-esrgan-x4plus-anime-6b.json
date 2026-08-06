@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "asset_id": "real-esrgan-x4plus-anime-6b",
   "asset_type": "upscale_model",
-  "generated_at": "2026-08-02T15:01:39Z",
+  "generated_at": "2026-08-06T14:31:47Z",
   "identity": {
     "name": "Real-ESRGAN x4plus anime 6B",
     "version_name": "v0.2.2.4"
@@ -14,7 +14,7 @@
     "provider_model_id": "xinntao/Real-ESRGAN",
     "provider_version_id": 48759268,
     "revision": "v0.2.2.4",
-    "retrieved_at": "2026-08-03T00:01:39+09:00"
+    "retrieved_at": "2026-08-06T23:31:47+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -28,7 +28,9 @@
     "exists": false,
     "size_bytes": null,
     "sha256": null,
+    "weights_sha256": null,
     "provider_sha256": null,
+    "provider_weights_sha256": null,
     "verification": "local_file_missing"
   },
   "license": {

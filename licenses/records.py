@@ -17,8 +17,11 @@ from .review import Review
 from .io import (
     display_path,
     normalize_sha256,
+    normalize_weights_sha256,
     resolve_path,
+    safetensors_weights_sha256,
     sha256_file,
+    weights_hash_matches,
 )
 
 
@@ -48,6 +51,9 @@ def inspect_local_file(
     provider_sha256 = normalize_sha256(
         selected_file.get("provider_sha256")
     )
+    provider_weights_sha256 = normalize_weights_sha256(
+        selected_file.get("provider_weights_sha256")
+    )
 
     if local_path is None:
         return {
@@ -55,10 +61,12 @@ def inspect_local_file(
             "exists": False,
             "size_bytes": None,
             "sha256": None,
+            "weights_sha256": None,
             "provider_sha256": provider_sha256,
+            "provider_weights_sha256": provider_weights_sha256,
             "verification": (
                 "provider_hash_available"
-                if provider_sha256
+                if provider_sha256 or provider_weights_sha256
                 else "not_verifiable"
             ),
         }
@@ -72,7 +80,9 @@ def inspect_local_file(
             "exists": False,
             "size_bytes": None,
             "sha256": None,
+            "weights_sha256": None,
             "provider_sha256": provider_sha256,
+            "provider_weights_sha256": provider_weights_sha256,
             "verification": "local_file_missing",
         }
 
@@ -82,15 +92,26 @@ def inspect_local_file(
         )
 
     local_sha256 = None if skip_hash else sha256_file(local_path)
+    local_weights_sha256 = (
+        None if skip_hash else safetensors_weights_sha256(local_path)
+    )
 
     if skip_hash:
         verification = "hash_skipped"
+    elif provider_weights_sha256 and local_weights_sha256:
+        verification = (
+            "weights_match"
+            if weights_hash_matches(
+                local_weights_sha256, provider_weights_sha256
+            )
+            else "weights_mismatch"
+        )
     elif provider_sha256 is None:
         verification = "provider_hash_unavailable"
     elif local_sha256 == provider_sha256:
-        verification = "match"
+        verification = "exact_file_match"
     else:
-        verification = "mismatch"
+        verification = "exact_file_mismatch"
 
     return {
         "configured_path": display_path(
@@ -100,7 +121,9 @@ def inspect_local_file(
         "exists": True,
         "size_bytes": local_path.stat().st_size,
         "sha256": local_sha256,
+        "weights_sha256": local_weights_sha256,
         "provider_sha256": provider_sha256,
+        "provider_weights_sha256": provider_weights_sha256,
         "verification": verification,
     }
 

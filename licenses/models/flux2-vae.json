@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "asset_id": "flux2-vae",
   "asset_type": "vae",
-  "generated_at": "2026-08-02T16:38:25Z",
+  "generated_at": "2026-08-06T14:31:48Z",
   "identity": {
     "name": "FLUX.2 VAE",
     "version_name": "main"
@@ -14,7 +14,7 @@
     "provider_model_id": "Comfy-Org/ERNIE-Image",
     "provider_version_id": null,
     "revision": "629188faf9dc5248753bd1ebec50ef9452f2b162",
-    "retrieved_at": "2026-08-03T01:38:25+09:00"
+    "retrieved_at": "2026-08-06T23:31:48+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -30,7 +30,9 @@
     "exists": false,
     "size_bytes": null,
     "sha256": null,
+    "weights_sha256": null,
     "provider_sha256": "D64F3A68E1CC4F9F4E29B6E0DA38A0204FE9A49F2D4053F0EC1FA1CA02F9C4B5",
+    "provider_weights_sha256": null,
     "verification": "local_file_missing"
   },
   "license": {

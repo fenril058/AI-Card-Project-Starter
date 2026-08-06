@@ -57,6 +57,19 @@ filename = "RealESRGAN_x4plus_anime_6B.pth"
 revision = "v0.2.2.4"
 
 [[assets]]
+id = "xinsir-controlnet-scribble-sdxl-1"
+type = "controlnet"
+name = "xinsir ControlNet Scribble SDXL 1.0"
+version_name = "1.0"
+local_path = "models/controlnet/xinsir_controlnet_scribble_sdxl_v1.safetensors"
+license_url = "https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/blob/main/README.md"
+[assets.source]
+provider = "huggingface"
+repo_id = "xinsir/controlnet-scribble-sdxl-1.0"
+filename = "diffusion_pytorch_model.safetensors"
+revision = "main"
+
+[[assets]]
 id = "flux2-klein-base-4b-fp8"
 type = "diffusion_model"
 name = "FLUX.2 Klein Base 4B FP8"

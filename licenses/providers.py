@@ -11,7 +11,7 @@ from huggingface_hub import HfApi
 from .registry import Asset
 from .constants import USER_AGENT
 from .errors import LicenseManagerError
-from .io import normalize_sha256
+from .io import normalize_sha256, normalize_weights_sha256
 
 
 def request_json(
@@ -122,6 +122,9 @@ def fetch_civitai(
     provider_sha256 = normalize_sha256(
         hashes.get("SHA256") or hashes.get("sha256")
     )
+    provider_weights_sha256 = normalize_weights_sha256(
+        hashes.get("AutoV3") or hashes.get("AUTOV3")
+    )
 
     model_id = raw.get("modelId")
     canonical_url = (
@@ -161,6 +164,7 @@ def fetch_civitai(
             "size_bytes": provider_size_bytes,
             "download_url": selected.get("downloadUrl"),
             "provider_sha256": provider_sha256,
+            "provider_weights_sha256": provider_weights_sha256,
         },
         "provider_metadata": {
             "created_at": raw.get("createdAt"),
@@ -296,6 +300,7 @@ def fetch_huggingface(
                 f"{resolved_revision}/{filename}"
             ),
             "provider_sha256": hf_lfs_sha256(selected),
+            "provider_weights_sha256": None,
         },
         "provider_metadata": {
             "last_modified": object_to_jsonable(
@@ -372,6 +377,7 @@ def fetch_github_release(
             "size_bytes": selected.get("size"),
             "download_url": selected.get("browser_download_url"),
             "provider_sha256": None,
+            "provider_weights_sha256": None,
         },
         "provider_metadata": {
             "published_at": release.get("published_at"),

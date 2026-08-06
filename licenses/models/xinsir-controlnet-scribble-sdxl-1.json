@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.1.0",
+  "asset_id": "xinsir-controlnet-scribble-sdxl-1",
+  "asset_type": "controlnet",
+  "generated_at": "2026-08-06T14:31:47Z",
+  "identity": {
+    "name": "xinsir ControlNet Scribble SDXL 1.0",
+    "version_name": "1.0"
+  },
+  "source": {
+    "provider": "huggingface",
+    "canonical_url": "https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/blob/0bed4973b80c2329f76e0abf4196c51dfbf9108c/diffusion_pytorch_model.safetensors",
+    "api_url": "https://huggingface.co/api/models/xinsir/controlnet-scribble-sdxl-1.0",
+    "provider_model_id": "xinsir/controlnet-scribble-sdxl-1.0",
+    "provider_version_id": null,
+    "revision": "0bed4973b80c2329f76e0abf4196c51dfbf9108c",
+    "retrieved_at": "2026-08-06T23:31:47+09:00"
+  },
+  "provenance": {
+    "base_model": null,
+    "notes": []
+  },
+  "file": {
+    "filename": "diffusion_pytorch_model.safetensors",
+    "download_url": "https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/resolve/0bed4973b80c2329f76e0abf4196c51dfbf9108c/diffusion_pytorch_model.safetensors",
+    "provider_size_bytes": 2502139104,
+    "configured_path": "models/controlnet/xinsir_controlnet_scribble_sdxl_v1.safetensors",
+    "exists": false,
+    "size_bytes": null,
+    "sha256": null,
+    "weights_sha256": null,
+    "provider_sha256": "B3E4AC47BC814019D50DC842F579301440DEB6D8F09EE1B91A30F527ACE1B852",
+    "provider_weights_sha256": null,
+    "verification": "local_file_missing"
+  },
+  "license": {
+    "declared": null,
+    "declared_url": "https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/blob/main/README.md",
+    "notes": []
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_at": "2026-08-06",
+    "reviewed_by": "Codex (AI調査 / Web一次情報ベース、要人間の最終確認)",
+    "permissions": {
+      "generated_output_commercial_use": "allowed",
+      "generated_output_sale": "allowed",
+      "model_redistribution": "allowed_with_conditions",
+      "derivative_model_distribution": "allowed_with_conditions",
+      "hosted_inference_or_api": "allowed",
+      "attribution": "allowed_with_conditions"
+    },
+    "todo": [
+      "モデルファイルまたは派生モデルを再配布する場合はApache-2.0のLICENSEおよびNOTICE（存在する場合）を同梱し、変更箇所を表示する。"
+    ],
+    "notes": [
+      "xinsir/controlnet-scribble-sdxl-1.0 の公式Hugging FaceモデルカードはライセンスをApache-2.0と明示している。",
+      "登録対象は公式配布の diffusion_pytorch_model.safetensors。ComfyUI上では xinsir_controlnet_scribble_sdxl_v1.safetensors へ改名して使用するため、ファイル名ではなくハッシュで同一性を確認する。",
+      "Apache-2.0は商用利用、改変、ホスティングおよび生成物の販売を許容する。モデルまたは派生物の再配布時はライセンス全文、NOTICE、変更表示など第4条の条件に従う。",
+      "Apache-2.0は商標利用権を付与しないため、作者またはプロジェクトによる公式な提携・推奨を示唆しない。"
+    ]
+  },
+  "evidence": [],
+  "provider_metadata": {
+    "last_modified": "2024-07-09T15:41:26+00:00",
+    "private": false,
+    "gated": false,
+    "pipeline_tag": "text-to-image"
+  }
+}

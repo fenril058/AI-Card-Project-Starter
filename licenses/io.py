@@ -13,6 +13,9 @@ from .constants import CHUNK_SIZE
 from .errors import LicenseManagerError
 
 
+SAFETENSORS_HEADER_LIMIT = 64 * 1024 * 1024
+
+
 def read_toml(path: Path, *, required: bool = True) -> dict[str, Any]:
     if not path.exists():
         if required:
@@ -54,6 +57,19 @@ def normalize_sha256(value: Any) -> str | None:
     return normalized if re.fullmatch(r"[0-9A-F]{64}", normalized) else None
 
 
+def normalize_weights_sha256(value: Any) -> str | None:
+    """Normalize a full ModelSpec hash or Civitai's 12-char AutoV3 prefix."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().removeprefix("0x").removeprefix("0X").upper()
+    return normalized if re.fullmatch(r"[0-9A-F]{12,64}", normalized) else None
+
+
+def weights_hash_matches(local: str, provider: str) -> bool:
+    """Compare a full local hash with a provider hash or documented prefix."""
+    return len(local) >= len(provider) and local.startswith(provider)
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     try:
@@ -63,6 +79,38 @@ def sha256_file(path: Path) -> str:
     except OSError as exc:
         raise LicenseManagerError(f"Cannot hash {path}: {exc}") from exc
     return digest.hexdigest().upper()
+
+
+def safetensors_weights_sha256(path: Path) -> str | None:
+    """Return the tensor-data identity declared by a safetensors file.
+
+    A whole-file digest also covers JSON header padding and therefore cannot
+    reliably identify equal weights from differently packaged files. ModelSpec's
+    hash covers the tensor data and can be compared with Civitai's AutoV3 hash.
+    Missing or malformed metadata is intentionally reported as unknown.
+    """
+    if path.suffix.lower() != ".safetensors":
+        return None
+
+    try:
+        with path.open("rb") as file:
+            raw_length = file.read(8)
+            if len(raw_length) != 8:
+                return None
+            length = int.from_bytes(raw_length, "little")
+            if not 0 < length <= SAFETENSORS_HEADER_LIMIT:
+                return None
+            header = json.loads(file.read(length))
+    except (OSError, ValueError):
+        return None
+
+    metadata = header.get("__metadata__")
+    if not isinstance(metadata, dict):
+        return None
+    declared = metadata.get("modelspec.hash_sha256")
+    if not isinstance(declared, str):
+        return None
+    return normalize_sha256(declared.removeprefix("0x"))
 
 
 def resolve_path(repository_root: Path, value: str | None) -> Path | None:

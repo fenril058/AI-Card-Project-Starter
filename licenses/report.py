@@ -37,8 +37,8 @@ def render_readme(
         "",
         "## Assets",
         "",
-        "| Asset | Type | Provider | Version | Local SHA-256 | Hash check | Review | Commercial output |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Asset | Type | Provider | Version | File SHA-256 | Weights SHA-256 | Identity check | Review | Commercial output |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
 
     for record in sorted(
@@ -72,6 +72,7 @@ def render_readme(
                 markdown_escape(source.get("provider")),
                 markdown_escape(identity.get("version_name")),
                 short_hash(file_info.get("sha256")),
+                short_hash(file_info.get("weights_sha256")),
                 markdown_escape(file_info.get("verification")),
                 markdown_escape(review.get("status")),
                 markdown_escape(
@@ -85,6 +86,13 @@ def render_readme(
         )
 
     lines.extend([
+        "",
+        "## Hash semantics",
+        "",
+        "- `File SHA-256` identifies the exact bytes used for reproducibility.",
+        "- `Weights SHA-256` is safetensors `modelspec.hash_sha256` and identifies tensor data even when header padding differs.",
+        "- Provider identity checks prefer the weights hash. Civitai `AutoV3` values are recorded and compared as 12-character prefixes.",
+        "- A missing weights hash remains unknown; the report does not infer one from a filename or whole-file digest.",
         "",
         "## Commands",
         "",

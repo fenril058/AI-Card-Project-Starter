@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "asset_id": "z-image-turbo-bf16",
   "asset_type": "diffusion_model",
-  "generated_at": "2026-08-02T08:30:44Z",
+  "generated_at": "2026-08-06T14:31:46Z",
   "identity": {
     "name": "Z-Image-Turbo",
     "version_name": "main"
@@ -14,7 +14,7 @@
     "provider_model_id": "Comfy-Org/z_image_turbo",
     "provider_version_id": null,
     "revision": "d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e",
-    "retrieved_at": "2026-08-02T17:30:44+09:00"
+    "retrieved_at": "2026-08-06T23:31:46+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -28,7 +28,9 @@
     "exists": false,
     "size_bytes": null,
     "sha256": null,
+    "weights_sha256": null,
     "provider_sha256": "2407613050B809FFDFF18A4AC99AF83EA6B95443ECEBDF80E064A79C825574A6",
+    "provider_weights_sha256": null,
     "verification": "local_file_missing"
   },
   "license": {

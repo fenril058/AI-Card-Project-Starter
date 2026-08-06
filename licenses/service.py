@@ -11,7 +11,15 @@ from .constants import (
     VALID_REVIEW_STATUSES,
 )
 from .errors import LicenseManagerError
-from .io import normalize_sha256, resolve_path, sha256_file, write_json
+from .io import (
+    normalize_sha256,
+    normalize_weights_sha256,
+    resolve_path,
+    safetensors_weights_sha256,
+    sha256_file,
+    write_json,
+    weights_hash_matches,
+)
 from .providers import fetch_provider
 from .records import build_record, read_generated_records
 from .report import render_readme, write_report
@@ -73,12 +81,15 @@ class LicenseService:
                 )
 
                 if (
-                    record["file"]["verification"] == "mismatch"
+                    record["file"]["verification"] in {
+                        "weights_mismatch",
+                        "exact_file_mismatch",
+                    }
                     and not allow_hash_mismatch
                 ):
                     raise LicenseManagerError(
-                        f"{asset_id}: local SHA-256 does not "
-                        "match provider SHA-256"
+                        f"{asset_id}: local model identity does not "
+                        "match the provider record"
                     )
 
                 write_json(
@@ -303,10 +314,27 @@ class LicenseService:
             provider_sha256 = normalize_sha256(
                 file_info.get("provider_sha256")
             )
-            if provider_sha256 and actual != provider_sha256:
+            actual_weights = safetensors_weights_sha256(local_path)
+            recorded_weights = normalize_sha256(
+                file_info.get("weights_sha256")
+            )
+            if actual_weights != recorded_weights:
                 errors.append(
-                    f"{asset_id}: local SHA-256 differs "
-                    "from provider SHA-256"
+                    f"{asset_id}: local weight identity changed since sync"
+                )
+
+            provider_weights = normalize_weights_sha256(
+                file_info.get("provider_weights_sha256")
+            )
+            if provider_weights and actual_weights:
+                if not weights_hash_matches(actual_weights, provider_weights):
+                    errors.append(
+                        f"{asset_id}: local weights differ from provider"
+                    )
+            elif provider_sha256 and actual != provider_sha256:
+                errors.append(
+                    f"{asset_id}: local file differs from provider; "
+                    "no comparable weight hash is available"
                 )
 
         return errors
