@@ -165,6 +165,7 @@ def fetch_civitai(
             "download_url": selected.get("downloadUrl"),
             "provider_sha256": provider_sha256,
             "provider_weights_sha256": provider_weights_sha256,
+            "expected_sha256": configured_sha256(asset),
         },
         "provider_metadata": {
             "created_at": raw.get("createdAt"),
@@ -223,6 +224,15 @@ def hf_lfs_sha256(sibling: Any) -> str | None:
         getattr(lfs, "sha256", None)
         or getattr(lfs, "oid", None)
     )
+
+
+def configured_sha256(asset: Asset) -> str | None:
+    value = normalize_sha256(asset.source.expected_sha256)
+    if asset.source.expected_sha256 and value is None:
+        raise LicenseManagerError(
+            f"{asset.id}: source.expected_sha256 must be 64 hexadecimal characters"
+        )
+    return value
 
 
 def fetch_huggingface(
@@ -301,6 +311,7 @@ def fetch_huggingface(
             ),
             "provider_sha256": hf_lfs_sha256(selected),
             "provider_weights_sha256": None,
+            "expected_sha256": configured_sha256(asset),
         },
         "provider_metadata": {
             "last_modified": object_to_jsonable(
@@ -378,6 +389,7 @@ def fetch_github_release(
             "download_url": selected.get("browser_download_url"),
             "provider_sha256": None,
             "provider_weights_sha256": None,
+            "expected_sha256": configured_sha256(asset),
         },
         "provider_metadata": {
             "published_at": release.get("published_at"),

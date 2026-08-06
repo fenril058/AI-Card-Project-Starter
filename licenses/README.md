@@ -7,22 +7,22 @@
 
 | Asset | Type | Provider | Version | File SHA-256 | Weights SHA-256 | Identity check | Review | Commercial output |
 |---|---|---|---|---|---|---|---|---|
-| [FLUX.2 Klein 4B FP8](https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/blob/5b4408e59397a4a37ccb46afe426d8ed86379441/flux-2-klein-4b-fp8.safetensors) | diffusion_model | huggingface | main | — | — | local_file_missing | approved | allowed |
-| [FLUX.2 Klein Base 4B FP8](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4b-fp8/blob/103db268c10d4d3921101b46057671f9ac460da6/flux-2-klein-base-4b-fp8.safetensors) | diffusion_model | huggingface | main | — | — | local_file_missing | approved | allowed |
-| [FLUX.2 VAE](https://huggingface.co/Comfy-Org/ERNIE-Image/blob/629188faf9dc5248753bd1ebec50ef9452f2b162/vae/flux2-vae.safetensors) | vae | huggingface | main | — | — | local_file_missing | approved | allowed |
-| [Qwen 3 4B](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/text_encoders/qwen_3_4b.safetensors) | text_encoder | huggingface | main | — | — | local_file_missing | approved | allowed |
-| [Real-ESRGAN x4plus anime 6B](https://github.com/xinntao/Real-ESRGAN) | upscale_model | github_release | v0.2.2.4 | — | — | local_file_missing | reviewing | allowed |
-| [WAI-illustrious-SDXL](https://civitai.com/models/827184?modelVersionId=2883731) | checkpoint | civitai | v17.0 | — | — | local_file_missing | reviewing | allowed |
-| [xinsir ControlNet Scribble SDXL 1.0](https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/blob/0bed4973b80c2329f76e0abf4196c51dfbf9108c/diffusion_pytorch_model.safetensors) | controlnet | huggingface | 1.0 | — | — | local_file_missing | approved | allowed |
-| [Z-Image AE](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/vae/ae.safetensors) | vae | huggingface | main | — | — | local_file_missing | approved | allowed |
-| [Z-Image-Turbo](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/diffusion_models/z_image_turbo_bf16.safetensors) | diffusion_model | huggingface | main | — | — | local_file_missing | approved | allowed |
+| [FLUX.2 Klein 4B FP8](https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/blob/5b4408e59397a4a37ccb46afe426d8ed86379441/flux-2-klein-4b-fp8.safetensors) | diffusion_model | huggingface | main | `97ED34FE0567…` (source) | — | local_file_missing | approved | allowed |
+| [FLUX.2 Klein Base 4B FP8](https://huggingface.co/black-forest-labs/FLUX.2-klein-base-4b-fp8/blob/103db268c10d4d3921101b46057671f9ac460da6/flux-2-klein-base-4b-fp8.safetensors) | diffusion_model | huggingface | main | `44BAB3A86FE9…` (source) | — | local_file_missing | approved | allowed |
+| [FLUX.2 VAE](https://huggingface.co/Comfy-Org/ERNIE-Image/blob/629188faf9dc5248753bd1ebec50ef9452f2b162/vae/flux2-vae.safetensors) | vae | huggingface | main | `D64F3A68E1CC…` (source) | — | local_file_missing | approved | allowed |
+| [Qwen 3 4B](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/text_encoders/qwen_3_4b.safetensors) | text_encoder | huggingface | main | `6C671498573A…` (source) | — | local_file_missing | approved | allowed |
+| [Real-ESRGAN x4plus anime 6B](https://github.com/xinntao/Real-ESRGAN) | upscale_model | github_release | v0.2.2.4 | `F872D837D3C9…` (pinned) | n/a | local_file_missing | approved | allowed |
+| [WAI-illustrious-SDXL](https://civitai.com/models/827184?modelVersionId=2883731) | checkpoint | civitai | v17.0 | `F116B0C78FF4…` (source) | `9676C4622AF2` (source) | local_file_missing | approved | allowed |
+| [xinsir ControlNet Scribble SDXL 1.0](https://huggingface.co/xinsir/controlnet-scribble-sdxl-1.0/blob/0bed4973b80c2329f76e0abf4196c51dfbf9108c/diffusion_pytorch_model.safetensors) | controlnet | huggingface | 1.0 | `B3E4AC47BC81…` (source) | — | local_file_missing | approved | allowed |
+| [Z-Image AE](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/vae/ae.safetensors) | vae | huggingface | main | `AFC8E28272CD…` (source) | — | local_file_missing | approved | allowed |
+| [Z-Image-Turbo](https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/diffusion_models/z_image_turbo_bf16.safetensors) | diffusion_model | huggingface | main | `2407613050B8…` (source) | — | local_file_missing | approved | allowed |
 
 ## Hash semantics
 
-- `File SHA-256` identifies the exact bytes used for reproducibility.
+- `File SHA-256` identifies exact bytes. Local values are preferred; `(source)` comes from the distributor and `(pinned)` is a reviewed expected digest.
 - `Weights SHA-256` is safetensors `modelspec.hash_sha256` and identifies tensor data even when header padding differs.
 - Provider identity checks prefer the weights hash. Civitai `AutoV3` values are recorded and compared as 12-character prefixes.
-- A missing weights hash remains unknown; the report does not infer one from a filename or whole-file digest.
+- A missing weights hash remains unknown; `n/a` means the non-safetensors format does not carry ModelSpec metadata.
 
 ## Commands
 

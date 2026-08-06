@@ -55,6 +55,7 @@ provider = "github_release"
 repo_id = "xinntao/Real-ESRGAN"
 filename = "RealESRGAN_x4plus_anime_6B.pth"
 revision = "v0.2.2.4"
+expected_sha256 = "F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA"
 
 [[assets]]
 id = "xinsir-controlnet-scribble-sdxl-1"

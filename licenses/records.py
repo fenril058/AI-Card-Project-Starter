@@ -54,6 +54,10 @@ def inspect_local_file(
     provider_weights_sha256 = normalize_weights_sha256(
         selected_file.get("provider_weights_sha256")
     )
+    expected_sha256 = normalize_sha256(
+        selected_file.get("expected_sha256")
+    )
+    comparison_sha256 = provider_sha256 or expected_sha256
 
     if local_path is None:
         return {
@@ -64,9 +68,10 @@ def inspect_local_file(
             "weights_sha256": None,
             "provider_sha256": provider_sha256,
             "provider_weights_sha256": provider_weights_sha256,
+            "expected_sha256": expected_sha256,
             "verification": (
                 "provider_hash_available"
-                if provider_sha256 or provider_weights_sha256
+                if comparison_sha256 or provider_weights_sha256
                 else "not_verifiable"
             ),
         }
@@ -83,6 +88,7 @@ def inspect_local_file(
             "weights_sha256": None,
             "provider_sha256": provider_sha256,
             "provider_weights_sha256": provider_weights_sha256,
+            "expected_sha256": expected_sha256,
             "verification": "local_file_missing",
         }
 
@@ -106,9 +112,9 @@ def inspect_local_file(
             )
             else "weights_mismatch"
         )
-    elif provider_sha256 is None:
+    elif comparison_sha256 is None:
         verification = "provider_hash_unavailable"
-    elif local_sha256 == provider_sha256:
+    elif local_sha256 == comparison_sha256:
         verification = "exact_file_match"
     else:
         verification = "exact_file_mismatch"
@@ -124,6 +130,7 @@ def inspect_local_file(
         "weights_sha256": local_weights_sha256,
         "provider_sha256": provider_sha256,
         "provider_weights_sha256": provider_weights_sha256,
+        "expected_sha256": expected_sha256,
         "verification": verification,
     }
 

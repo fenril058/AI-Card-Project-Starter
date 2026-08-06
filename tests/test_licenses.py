@@ -4,8 +4,10 @@ import unittest
 from pathlib import Path
 
 from licenses.io import safetensors_weights_sha256
+from licenses.providers import configured_sha256
 from licenses.records import inspect_local_file
 from licenses.registry import Asset, Registry, Source
+from licenses.report import render_readme
 
 
 class LicenseHashTest(unittest.TestCase):
@@ -80,6 +82,41 @@ class LicenseCoverageTest(unittest.TestCase):
                 approved.update(filenames)
 
         self.assertEqual(approved - registered, set())
+
+    def test_report_falls_back_to_reviewed_source_hashes(self) -> None:
+        record = {
+            "asset_id": "model",
+            "asset_type": "checkpoint",
+            "identity": {"name": "Model", "version_name": "1"},
+            "source": {"provider": "civitai"},
+            "file": {
+                "filename": "model.safetensors",
+                "sha256": None,
+                "weights_sha256": None,
+                "provider_sha256": "ab" * 32,
+                "provider_weights_sha256": "cd" * 6,
+                "verification": "local_file_missing",
+            },
+            "review": {
+                "status": "approved",
+                "permissions": {"generated_output_commercial_use": "allowed"},
+            },
+        }
+
+        report = render_readme([record])
+        self.assertIn("`ABABABABABAB…` (source)", report)
+        self.assertIn("`CDCDCDCDCDCD` (source)", report)
+
+    def test_configured_hash_can_pin_a_source_without_api_digest(self) -> None:
+        asset = Asset(
+            id="model",
+            type="upscale_model",
+            source=Source(
+                provider="github_release",
+                expected_sha256="ef" * 32,
+            ),
+        )
+        self.assertEqual(configured_sha256(asset), ("EF" * 32))
 
 
 if __name__ == "__main__":

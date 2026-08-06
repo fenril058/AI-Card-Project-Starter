@@ -314,6 +314,9 @@ class LicenseService:
             provider_sha256 = normalize_sha256(
                 file_info.get("provider_sha256")
             )
+            expected_sha256 = normalize_sha256(
+                file_info.get("expected_sha256")
+            )
             actual_weights = safetensors_weights_sha256(local_path)
             recorded_weights = normalize_sha256(
                 file_info.get("weights_sha256")
@@ -331,9 +334,11 @@ class LicenseService:
                     errors.append(
                         f"{asset_id}: local weights differ from provider"
                     )
-            elif provider_sha256 and actual != provider_sha256:
+            elif (
+                provider_sha256 or expected_sha256
+            ) and actual != (provider_sha256 or expected_sha256):
                 errors.append(
-                    f"{asset_id}: local file differs from provider; "
+                    f"{asset_id}: local file differs from source record; "
                     "no comparable weight hash is available"
                 )
 

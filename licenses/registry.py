@@ -40,6 +40,7 @@ class Source:
     revision: str | None = None
     url: str | None = None
     name: str | None = None
+    expected_sha256: str | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any], context: str) -> "Source":
@@ -51,21 +52,24 @@ class Source:
             return cls(provider=provider, model_version_id=version_id,
                        filename=_optional_string(value, "filename", context),
                        url=_optional_string(value, "url", context),
-                       name=_optional_string(value, "name", context))
+                       name=_optional_string(value, "name", context),
+                       expected_sha256=_optional_string(value, "expected_sha256", context))
         if provider == "huggingface":
             return cls(provider=provider,
                        repo_id=_required_string(value, "repo_id", context),
                        filename=_required_string(value, "filename", context),
                        revision=_optional_string(value, "revision", context) or "main",
                        url=_optional_string(value, "url", context),
-                       name=_optional_string(value, "name", context))
+                       name=_optional_string(value, "name", context),
+                       expected_sha256=_optional_string(value, "expected_sha256", context))
         if provider == "github_release":
             return cls(provider=provider,
                        repo_id=_required_string(value, "repo_id", context),
                        filename=_required_string(value, "filename", context),
                        revision=_required_string(value, "revision", context),
                        url=_optional_string(value, "url", context),
-                       name=_optional_string(value, "name", context))
+                       name=_optional_string(value, "name", context),
+                       expected_sha256=_optional_string(value, "expected_sha256", context))
         raise LicenseManagerError(
             f"{context}.provider must be civitai, huggingface or github_release"
         )

@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .io import atomic_write_text, normalize_sha256
+from .io import (
+    atomic_write_text,
+    normalize_sha256,
+    normalize_weights_sha256,
+)
 
 
 def markdown_escape(value: Any) -> str:
@@ -17,13 +21,29 @@ def markdown_escape(value: Any) -> str:
     )
 
 
-def short_hash(value: Any) -> str:
-    normalized = normalize_sha256(value)
-    return (
-        f"`{normalized[:12]}…`"
-        if normalized
-        else "—"
-    )
+def hash_cell(
+    local: Any,
+    provider: Any,
+    expected: Any = None,
+    *,
+    weights: bool = False,
+) -> str:
+    normalize = normalize_weights_sha256 if weights else normalize_sha256
+    for value, label in (
+        (local, ""),
+        (provider, "source"),
+        (expected, "pinned"),
+    ):
+        normalized = normalize(value)
+        if normalized:
+            shown = (
+                normalized
+                if len(normalized) <= 12
+                else f"{normalized[:12]}…"
+            )
+            suffix = f" ({label})" if label else ""
+            return f"`{shown}`{suffix}"
+    return "—"
 
 
 def render_readme(
@@ -71,8 +91,20 @@ def render_readme(
                 markdown_escape(record.get("asset_type")),
                 markdown_escape(source.get("provider")),
                 markdown_escape(identity.get("version_name")),
-                short_hash(file_info.get("sha256")),
-                short_hash(file_info.get("weights_sha256")),
+                hash_cell(
+                    file_info.get("sha256"),
+                    file_info.get("provider_sha256"),
+                    file_info.get("expected_sha256"),
+                ),
+                (
+                    "n/a"
+                    if str(file_info.get("filename", "")).lower().endswith(".pth")
+                    else hash_cell(
+                        file_info.get("weights_sha256"),
+                        file_info.get("provider_weights_sha256"),
+                        weights=True,
+                    )
+                ),
                 markdown_escape(file_info.get("verification")),
                 markdown_escape(review.get("status")),
                 markdown_escape(
@@ -89,10 +121,10 @@ def render_readme(
         "",
         "## Hash semantics",
         "",
-        "- `File SHA-256` identifies the exact bytes used for reproducibility.",
+        "- `File SHA-256` identifies exact bytes. Local values are preferred; `(source)` comes from the distributor and `(pinned)` is a reviewed expected digest.",
         "- `Weights SHA-256` is safetensors `modelspec.hash_sha256` and identifies tensor data even when header padding differs.",
         "- Provider identity checks prefer the weights hash. Civitai `AutoV3` values are recorded and compared as 12-character prefixes.",
-        "- A missing weights hash remains unknown; the report does not infer one from a filename or whole-file digest.",
+        "- A missing weights hash remains unknown; `n/a` means the non-safetensors format does not carry ModelSpec metadata.",
         "",
         "## Commands",
         "",

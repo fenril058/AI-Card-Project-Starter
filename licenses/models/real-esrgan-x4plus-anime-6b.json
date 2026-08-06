@@ -2,7 +2,7 @@
   "schema_version": "1.1.0",
   "asset_id": "real-esrgan-x4plus-anime-6b",
   "asset_type": "upscale_model",
-  "generated_at": "2026-08-06T14:31:47Z",
+  "generated_at": "2026-08-06T15:00:19Z",
   "identity": {
     "name": "Real-ESRGAN x4plus anime 6B",
     "version_name": "v0.2.2.4"
@@ -14,7 +14,7 @@
     "provider_model_id": "xinntao/Real-ESRGAN",
     "provider_version_id": 48759268,
     "revision": "v0.2.2.4",
-    "retrieved_at": "2026-08-06T23:31:47+09:00"
+    "retrieved_at": "2026-08-07T00:00:19+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -31,6 +31,7 @@
     "weights_sha256": null,
     "provider_sha256": null,
     "provider_weights_sha256": null,
+    "expected_sha256": "F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA",
     "verification": "local_file_missing"
   },
   "license": {
@@ -39,9 +40,9 @@
     "notes": []
   },
   "review": {
-    "status": "reviewing",
-    "reviewed_at": "2026-08-02",
-    "reviewed_by": "Claude (AI調査 / Web一次情報ベース、要人間の最終確認)",
+    "status": "approved",
+    "reviewed_at": "2026-08-06",
+    "reviewed_by": "Codex (AI調査 / Web一次情報ベース、要人間の最終確認)",
     "permissions": {
       "generated_output_commercial_use": "allowed",
       "generated_output_sale": "allowed",
@@ -50,16 +51,15 @@
       "hosted_inference_or_api": "allowed",
       "attribution": "allowed_with_conditions"
     },
-    "todo": [
-      "モデルファイル自体を再配布する場合のみ、BSD-3-Clause第1条・第2条に従い著作権表示・ライセンス条文・免責事項を同梱する。現構成はローカル推論のみで再配布に該当しない。",
-      "カード画像の商用販売が具体化した時点で、本レビューの`status`を`approved`へ更新する。"
-    ],
+    "todo": [],
     "notes": [
       "LICENSE原文 (https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE) より確認: \"BSD 3-Clause License\" / \"Copyright (c) 2021, Xintao Wang\"。GitHub License API も spdx_id=\"BSD-3-Clause\" を返す。",
       "BSD-3-Clauseは許容的ライセンスで、本モデルを用いて生成・拡大した画像の利用および商用販売に制限を課さない。",
       "第3条により、著作権者名およびコントリビュータ名を、事前の書面許諾なく派生製品の推奨・宣伝目的に使用しないこと。カード製品にRWとして「Real-ESRGAN」や作者名を推薦表示として使わない。",
       "本プロジェクトでの用途は生成モデルではなく後処理のアップスケーラ。workflows/approved/wai_sdxl_hires_api.json のUpscaleModelLoaderから、localhostのComfyUI上でのみ使用する。再配布・有料ホスティングは行っていない。",
-      "GitHub Releases APIはアセットのチェックサムを返さないため provider_sha256 はnull。取得直後のローカルファイルのSHA-256は F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA (17,938,799 bytes)。"
+      "GitHub Releases APIはこの旧アセットのチェックサムを返さない。取得直後のローカルファイルで確認したSHA-256 F872D837D3C90ED2E05227BED711AF5671A6FD1C9F7D7E91C911A61F155E99DA (17,938,799 bytes) をregistry.tomlのexpected_sha256へ固定し、レポートでは(pinned)と区別して表示する。",
+      "モデルファイル自体を再配布する場合のみ、BSD-3-Clause第1条・第2条に従い著作権表示・ライセンス条文・免責事項を同梱する。現構成のローカル推論と、処理済み画像の商用利用・販売は再配布に該当しない。",
+      "カード画像の商用販売を含む本プロジェクトの用途について確認済みのためstatus=approvedとする。"
     ]
   },
   "evidence": [],
