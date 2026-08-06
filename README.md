@@ -1,94 +1,99 @@
 # AI Card Project Starter
 
-ComfyUI Portableを `127.0.0.1:8188` で動かし、`uv` 管理のPythonから承認済みAPIワークフローだけを実行するローカル画像生成スターターです。
+ComfyUI Portableを `127.0.0.1:8188` で動かし、承認済みモデルとAPI形式ワークフローだけを `uv` 管理のPythonから実行する、ローカル画像生成パイプラインです。
+
+このリポジトリは公開可能な汎用パイプラインだけを保持します。原画、参照画像、生成物、ゲーム固有情報、モデル本体は追跡しません。カード枠、カード名、ルール文章、ロゴ、印刷用文字組みも画像生成には含めず、後工程で処理します。
+
+## 構成
 
 ```text
-AI-Card-Project-Starter-v3/
-├─ cardgen.py
+AI-Card-Project-Starter/
+├─ cardgen.py                  # 検証・生成CLI
 ├─ config/
-│  ├─ app.json
-│  └─ profiles/
-│     ├─ wai-hires.json
-│     ├─ wai-single.json
-│     └─ zimage.json
-├─ workflows/approved/
-│  ├─ wai_sdxl_hires_api.json     # WAI Hires Fix
-│  ├─ wai_sdxl_single_api.json    # WAI Single Pass
-│  └─ z_image_turbo_api.json      # 同梱済み
-├─ outputs/
-├─ licenses/
-├─ CLAUDE.md
+│  ├─ app.json                # 共通設定
+│  └─ profiles/*.json         # 生成パイプライン定義
+├─ workflows/approved/*.json  # 承認済みComfyUI APIワークフロー
+├─ licenses/                   # モデル出典・ライセンス・ハッシュ台帳
+├─ tests/
+├─ outputs/                    # Git追跡外の生成物と実行メタデータ
+├─ .env.example
 └─ pyproject.toml
 ```
 
-## 2. uv環境を準備
+## セットアップ
 
-PowerShellでprojectのルートへ移動し、初回だけ実行します。
+PowerShellでプロジェクトルートへ移動し、初回だけ依存関係を準備します。
 
 ```powershell
 uv sync
 ```
 
-グローバルPythonや仮想環境の手動有効化は不要です。
-
-## 3. プロファイルを確認
+ComfyUIのモデルをコピーせず、その場でハッシュ確認できるよう `.env` を作ります。
 
 ```powershell
-uv run python cardgen.py profiles
+Copy-Item .env.example .env
 ```
 
-例:
+`.env` にComfyUIの `models` ディレクトリの絶対パスを指定します。
 
-```text
-* wai-hires: WAI Illustrious SDXL (Hires Fix) [ready]
-  wai-single: WAI Illustrious SDXL (Single Pass) [ready]
-  zimage: Z-Image-Turbo [ready]
-* = default profile
+```dotenv
+CARDGEN_COMFYUI_MODELS_DIR=C:\path\to\ComfyUI\models
 ```
 
-`*` は `config/app.json` の既定プロファイルです。
+`.env` とモデル本体はGit管理外です。環境変数を直接設定している場合は、その値が `.env` より優先されます。
 
-## 4. 検証
+## ComfyUIをlocalhost限定で起動
 
-既定のWAI Hires Fix:
-
-```powershell
-uv run python cardgen.py validate
-```
-
-Z-Image-Turbo:
-
-```powershell
-uv run python cardgen.py --profile zimage validate
-```
-
-全プロファイル:
-
-```powershell
-uv run python cardgen.py validate --all
-```
-
-必要なモデルまたはワークフローが未配置の場合、`validate --all` は該当プロファイルで停止します。その場合は準備済みのプロファイルを個別検証してください。
-
-## 5. ComfyUI接続確認
-
-ComfyUI Portableを起動してから実行します。
-
-```powershell
-uv run python cardgen.py check
-```
-
-ComfyUIは次のようにlocalhost限定で起動してください。
+ComfyUI Portableのルートから起動します。
 
 ```powershell
 .\python_embeded\python.exe -s ComfyUI\main.py --windows-standalone-build --enable-manager
 ```
 
-`--listen` は追加しません。
+`--listen` は追加しません。このCLIは `http://127.0.0.1:<port>` または `http://localhost:<port>` 以外を拒否します。
 
-## 6. WAIで生成
+接続、GPU、モデルディレクトリを確認します。
 
-WAI Hires Fixは既定プロファイルなので、`--profile wai-hires` を省略できます。Real-ESRGAN 4x+ Anime6Bを使い、ベンダー推奨解像度のHires Fixを実行します。
+```powershell
+uv run python cardgen.py check
+```
+
+## 生成プロファイル
+
+```powershell
+uv run python cardgen.py profiles
+```
+
+現在のプロファイルは次の6種類です。
+
+| ID | 用途 | 入力画像 |
+|---|---|---|
+| `wai-hires` | WAI Illustrious SDXL、Hires Fix。既定プロファイル | 不要 |
+| `wai-single` | WAI Illustrious SDXL、Single Pass | 不要 |
+| `wai-controlnet` | Scribble ControlNet + Hires Fix | ラフ線画 |
+| `wai-refine` | 既存画像のアップスケール + ディテール調整 | 仕上げたい画像 |
+| `zimage` | Z-Image-Turbo | 不要 |
+| `flux2-klein-edit` | FLUX.2 Klein Baseによる参照編集 | 編集元画像 |
+
+`*` は `config/app.json` の既定プロファイルです。プロファイルはモデル単体ではなく、1種類の生成パイプラインを表します。
+
+## 検証
+
+既定プロファイル、個別プロファイル、全プロファイルをそれぞれ検証できます。
+
+```powershell
+uv run python cardgen.py validate
+uv run python cardgen.py --profile zimage validate
+uv run python cardgen.py validate --all
+```
+
+検証ではワークフロー形式、プロンプト・seed・入力画像のbinding、Sampler構成、negative方式、使用モデルがプロファイルの承認リストに含まれることを確認します。
+
+## 生成例
+
+### WAI Hires Fix
+
+`wai-hires` は既定値なので `--profile` を省略できます。
 
 ```powershell
 uv run python cardgen.py generate `
@@ -104,9 +109,33 @@ uv run python cardgen.py --profile wai-single generate `
   --prompt "masterpiece, best quality, fantasy landscape"
 ```
 
-`--negative` を省略すると、選択したプロファイルの既定値を使います。
+`--negative` を省略するとプロファイルの既定値を使います。
 
-## 7. Z-Image-Turboで生成
+### Scribble ControlNet
+
+`--input-image` には生成したい完成画像ではなく、構造を指定するラフ線画を渡します。
+
+```powershell
+uv run python cardgen.py --profile wai-controlnet generate `
+  --prompt "masterpiece, best quality, an archer drawing a longbow" `
+  --input-image "C:\path\to\private-project\references\bow-scribble.png" `
+  --count 1
+```
+
+ControlNetはbase passだけに適用し、Hires passでは構造を保ちながら仕上げます。
+
+### 既存画像のアップスケール + Refine
+
+```powershell
+uv run python cardgen.py --profile wai-refine generate `
+  --prompt "Preserve the composition and add clean print-ready detail" `
+  --input-image "C:\path\to\private-project\art\source.png" `
+  --count 1
+```
+
+入力画像はあらかじめ目的の縦横比へクロップしてください。このプロファイルは構図変更ではなく、アップスケールと軽いディテール追加を目的とします。
+
+### Z-Image-Turbo
 
 ```powershell
 uv run python cardgen.py --profile zimage generate `
@@ -114,12 +143,9 @@ uv run python cardgen.py --profile zimage generate `
   --count 1
 ```
 
-標準Z-Imageワークフローのnegative経路は `ConditioningZeroOut` です。独立したネガティブプロンプトは適用されないため、除外条件はポジティブプロンプトへ自然文で含めます。
+標準Z-Imageワークフローのnegative経路は `ConditioningZeroOut` です。独立したネガティブ文章は適用されないため、除外条件はポジティブプロンプトへ自然文で含めます。
 
-### FLUX.2 Kleinで参照編集
-
-入力画像を所有・管理する別プロジェクト内の絶対パスを明示します。この公開スターターには
-入力画像を保管しません。
+### FLUX.2 Klein参照編集
 
 ```powershell
 uv run python cardgen.py --profile flux2-klein-edit generate `
@@ -128,20 +154,11 @@ uv run python cardgen.py --profile flux2-klein-edit generate `
   --count 1
 ```
 
-入力画像はlocalhostのComfyUIへ送信するために読み取るだけで、このリポジトリへのコピーや
-メタデータへの絶対パス記録は行いません。相対パスは受け付けません。
+入力画像はユーザーが明示した既存の絶対パスだけを受け付け、localhostのComfyUIへ送信します。リポジトリへコピーせず、元の絶対パスやファイル名を実行メタデータへ記録しません。
 
-## 8. Seedと複数生成
+## Seed、枚数、生成設定の上書き
 
-固定Seed:
-
-```powershell
-uv run python cardgen.py --profile wai-hires generate `
-  --prompt "masterpiece, best quality, 1girl" `
-  --seed 123456789
-```
-
-連番Seedで4枚:
+固定seedから4枚生成すると、`1000`、`1001`、`1002`、`1003` を使います。
 
 ```powershell
 uv run python cardgen.py --profile wai-hires generate `
@@ -150,11 +167,7 @@ uv run python cardgen.py --profile wai-hires generate `
   --count 4
 ```
 
-この場合は `1000`、`1001`、`1002`、`1003` を使用します。
-
-## 9. 解像度とSampler設定の上書き
-
-生成時に解像度、ステップ数、CFG、Sampler、Schedulerを上書きできます。
+解像度とSampler設定も実行時に上書きできます。
 
 ```powershell
 uv run python cardgen.py --profile wai-single generate `
@@ -167,11 +180,11 @@ uv run python cardgen.py --profile wai-single generate `
   --scheduler karras
 ```
 
-`--width` と `--height` は必ず同時に、64以上かつ8の倍数で指定します。Sampler設定は、対象入力を持つすべてのSamplerノードへ適用されます。複数Samplerのワークフローで `--steps` を指定しても、`start_at_step` と `end_at_step` の分割点は変更されません。
+`--width` と `--height` は同時に、64以上かつ8の倍数で指定します。Sampler設定は該当入力を持つ全Samplerノードへ適用されます。
 
-## 10. 同じWAI方式でCheckpointを追加
+## 承認済みCheckpointの切り替え
 
-同じWAIワークフローで動くCheckpointなら、新規プロファイルを作らず、使用するWAIプロファイルの `approved_models.checkpoints` へ承認ファイル名を追加します。
+同じワークフローで動くCheckpointは、新規プロファイルではなく既存プロファイルの `approved_models.checkpoints` へ追加します。
 
 ```json
 "checkpoints": [
@@ -180,7 +193,7 @@ uv run python cardgen.py --profile wai-single generate `
 ]
 ```
 
-実行時に切り替えます。
+承認後、実行時に切り替えます。
 
 ```powershell
 uv run python cardgen.py --profile wai-single generate `
@@ -188,69 +201,58 @@ uv run python cardgen.py --profile wai-single generate `
   --prompt "masterpiece, best quality, 1girl"
 ```
 
-`--checkpoint` はワークフロー内の全Checkpoint Loaderを同じ承認済みファイルへ変更します。
+モデル、LoRA、Custom Node、ワークフローは自動ダウンロードしません。
 
-## 11. 新しいプロファイルを作る基準
+## 設定の役割
 
-新しいJSONを `config/profiles/` に追加するのは、生成方式が変わる場合です。
+`config/app.json` はComfyUI URL、既定プロファイル、プロファイルディレクトリ、出力先、タイムアウトを定義します。
 
-- SDXLとZ-Image/Flux
-- Single PassとHires Fixなど、生成パスが異なる方式
-- ControlNet必須
-- インペイント専用
-- アップスケール専用
+`config/profiles/<id>.json` はワークフロー、能力、binding、negative方式、Multi Passの有無、承認済みCheckpoint・UNet・CLIP・VAE・LoRA・Upscale Model・ControlNet、既定値を定義します。
 
-解像度、Seed、プロンプト、生成枚数だけの違いでプロファイルを増やさないでください。
+新しいプロファイルを作るのは生成パイプラインが変わる場合です。解像度、seed、プロンプト、枚数、同一方式で切り替え可能なCheckpointだけの違いでは増やしません。プロファイルまたは承認ワークフローを変更した後は `validate` を実行してください。
 
-## 設定ファイルの役割
+## 出力と再現メタデータ
 
-### `config/app.json`
+画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 5です。
 
-全プロファイル共通です。
+主な記録内容:
 
-- ComfyUI URL
-- 既定プロファイル
-- プロファイルディレクトリ
-- 出力先
-- HTTP・生成タイムアウト
+- プロファイル、ワークフロー、プロンプト、negative、seed、結果ファイル
+- ワークフローファイルの `workflow_sha256` と実際に送信したグラフの `queued_workflow_sha256`
+- 全ノードのリテラル設定 `generation_settings.node_inputs`
+- 使用モデルのファイルサイズ、全体 `sha256`、ModelSpec `weights_sha256`
+- ComfyUI、Python、PyTorchのバージョン
+- 出力画像ごとの `file_sha256`
+- `app_config_sha256`、`profile_sha256`、`input_image_sha256`
 
-### `config/profiles/<id>.json`
+プロンプト、seed、入力画像名は重複・誤認を避けるため `node_inputs` から除外し、それぞれ専用フィールドへ記録します。モデルハッシュはサイズと更新時刻をキーに `.cache/model-hashes.json` へキャッシュされます。
 
-1つの生成パイプラインを定義します。
+## モデルライセンスとハッシュ台帳
 
-- APIワークフロー
-- negativeの方式
-- Multi Passの有無
-- 承認済みCheckpoint・UNet・CLIP・VAE・LoRA・Upscale Model
-- 既定ネガティブプロンプト
+[licenses/README.md](licenses/README.md) に、使用モデルの出典、レビュー状態、商用生成物の可否、ローカルハッシュ照合結果をまとめています。
 
-## 出力
+```powershell
+uv run python -m licenses sync
+uv run python -m licenses verify --require-approved --require-local-files
+uv run python -m licenses report
+```
 
-画像とメタデータは `outputs/` に保存されます。メタデータには次が記録されます。
+`sync` は配布元情報を取得し、`.env` で指定したComfyUIモデルをその場で読み取って台帳を再生成します。大容量ファイルをハッシュするため時間がかかる場合があります。
 
-- 使用プロファイル
-- ワークフロー
-- モデルファイル
-- プロンプト
-- Seed
-- 実際に使用した解像度とSampler設定
-- ComfyUI prompt ID
-- 保存画像パス
+- `File SHA-256`: 同じファイルを使ったか確認する全バイトのハッシュ
+- `Weights SHA-256`: safetensorsの `modelspec.hash_sha256`。ヘッダーのパディング差を除いて重み同一性を確認
+- `exact_file_match`: ローカルファイルと配布元または固定値が完全一致
+- `weights_match`: ファイル全体は異なるが、Civitai AutoV3等と重みが一致
 
-元画像はComfyUI側のoutputフォルダにも残ります。
+モデルファイルを別名へ置き換えたり更新した場合は、生成前に再度 `sync` と厳格な `verify` を実行してください。
 
-## 対応範囲
+## 安全上の境界
 
-- `KSampler` / `KSamplerAdvanced`
-- Single Pass / Multi Pass（Hires Fix）
-- `EmptyLatentImage` / `EmptySD3LatentImage` の解像度上書き
-- Steps、CFG、Sampler、Schedulerの実行時上書き
-- `CLIPTextEncode`
-- `CLIPTextEncodeSDXL`
-- `CLIPTextEncodeSDXLRefiner`
-- negative側の `ConditioningZeroOut`
-- Checkpoint、UNet、CLIP、VAE、LoRAのカテゴリ別承認
-- Upscale Modelの承認
-- 承認済みCheckpointの実行時切り替え
+- ComfyUIはlocalhost以外へ公開しない
+- `workflows/approved/` のAPI形式ワークフローだけを使う
+- 選択プロファイルの `approved_models` に含まれるモデルだけを使う
+- モデル、LoRA、Custom Node、ワークフローを明示承認なく追加・更新・削除しない
+- 入力画像と生成物を公開リポジトリへ追加しない
+- カード固有情報と印刷用文字組みは後工程で扱う
 
-ControlNet、Conditioning Combine、地域プロンプトなどは、自動プロンプト置換の対象外です。
+詳細な運用規則は [AGENTS.md](AGENTS.md) を参照してください。
