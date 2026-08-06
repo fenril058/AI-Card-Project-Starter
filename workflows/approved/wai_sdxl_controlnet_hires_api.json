@@ -56,7 +56,7 @@
       "negative": ["7", 0],
       "control_net": ["32", 0],
       "image": ["31", 0],
-      "strength": 0.75,
+      "strength": 0.55,
       "start_percent": 0.0,
       "end_percent": 0.7
     }
