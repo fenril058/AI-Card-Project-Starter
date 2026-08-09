@@ -88,6 +88,35 @@ class CardGenTests(unittest.TestCase):
         self.assertFalse(summary["input_image_required"])
         self.assertIsNone(summary["input_image_node"])
 
+    def test_denoise_moves_only_the_bound_node(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        base_before = workflow["10"]["inputs"]["denoise"]
+        node_id = cardgen.set_bound_denoise(workflow, profile["bindings"], 0.6)
+        self.assertEqual(node_id, "12")
+        self.assertEqual(workflow["12"]["inputs"]["denoise"], 0.6)
+        # The base pass must keep denoise 1.0; a fractional value there would
+        # turn generation from empty latent into img2img over noise.
+        self.assertEqual(workflow["10"]["inputs"]["denoise"], base_before)
+        self.assertEqual(base_before, 1.0)
+
+    def test_denoise_is_rejected_outside_zero_to_one(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        for value in (-0.1, 1.5):
+            with self.assertRaises(cardgen.CardGenError):
+                cardgen.set_bound_denoise(workflow, profile["bindings"], value)
+
+    def test_denoise_is_refused_without_a_binding(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-single")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.set_bound_denoise(workflow, {}, 0.45)
+        self.assertEqual(workflow["10"]["inputs"]["denoise"], 1.0)
+
     def test_checkpoint_override_requires_approval(self) -> None:
         workflow = {
             "1": {

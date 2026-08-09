@@ -693,6 +693,30 @@ def set_bound_seed(
     return node_id, field
 
 
+def set_bound_denoise(
+    workflow: dict[str, Any], bindings: dict[str, Any], denoise: float
+) -> str:
+    """Overwrite denoise on the one node a profile names.
+
+    Deliberately not part of SAMPLER_OVERRIDE_FIELDS. Those overrides hit every
+    sampler exposing the field, which is right for steps/cfg but wrong here: a
+    hires graph wants denoise 1.0 on the base pass and a fraction on the second.
+    Applying one value to both turns the base pass into an img2img over empty
+    latent. So denoise moves only where the profile points it.
+    """
+    if not 0.0 <= denoise <= 1.0:
+        raise CardGenError("--denoiseは0.0以上1.0以下で指定してください。")
+    binding = bindings.get("denoise")
+    if not isinstance(binding, dict):
+        raise CardGenError(
+            "このプロファイルは--denoiseに対応していません。"
+            "対応させるにはプロファイルへbindings.denoiseを追加してください。"
+        )
+    node_id, node, field = bound_node(workflow, binding, "denoise")
+    node["inputs"][field] = denoise
+    return node_id
+
+
 def set_bound_input_image(
     workflow: dict[str, Any], bindings: dict[str, Any], uploaded_name: str
 ) -> str:
@@ -1015,8 +1039,13 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         )
 
     input_image_node: str | None = None
+    denoise_node: str | None = None
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
+        if "denoise" in bindings:
+            # Resolve only: bound_node raises on a stale node_id or field, and
+            # validate has no denoise to write. The workflow's own value stands.
+            denoise_node, _, _ = bound_node(probe, bindings["denoise"], "denoise")
         if "input_image" in bindings:
             # generate uploads first and binds the returned name, so the binding
             # itself is never resolved until a run is already underway. Resolve
@@ -1041,6 +1070,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "seed_field": seed_field,
         "input_image_required": input_image_node is not None,
         "input_image_node": input_image_node,
+        "denoise_node": denoise_node,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
         "zeroed_negative_nodes": zeroed_negative_nodes,
@@ -1291,6 +1321,15 @@ def command_generate(
     if not isinstance(output_dir, Path):
         raise CardGenError("output_dir_pathが不正です。")
 
+    denoise_node: str | None = None
+    if args.denoise is not None:
+        if not isinstance(bindings, dict):
+            raise CardGenError(
+                "このプロファイルは--denoiseに対応していません。"
+                "対応させるにはプロファイルへbindings.denoiseを追加してください。"
+            )
+        denoise_node = set_bound_denoise(workflow, bindings, args.denoise)
+
     if isinstance(bindings, dict):
         primary_id, _ = set_bound_seed(workflow, bindings, 1)
         if args.input_image is not None:
@@ -1393,6 +1432,8 @@ def command_generate(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     print(f"METADATA: {metadata_path}")
+    if failure_exc is not None:
+        raise failure_exc
     return 0
 
 
@@ -1461,6 +1502,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--sampler", dest="sampler_name", help="sampler_name（例: euler_ancestral）"
     )
     generate.add_argument("--scheduler", help="scheduler（例: normal, karras）")
+    generate.add_argument(
+        "--denoise",
+        type=float,
+        help="bindings.denoiseを持つプロファイルで、その1ノードのdenoiseを上書き（0.0〜1.0）",
+    )
     return parser
 
 

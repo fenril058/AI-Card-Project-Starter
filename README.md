@@ -87,7 +87,16 @@ uv run python cardgen.py --profile zimage validate
 uv run python cardgen.py validate --all
 ```
 
-検証ではワークフロー形式、プロンプト・seed・入力画像のbinding、Sampler構成、negative方式、使用モデルがプロファイルの承認リストに含まれることを確認します。
+検証は次を確認します。
+
+- ワークフローがAPI形式で読み込めること
+- プロンプト・seedのbindingが実在するノードと入力を指していること
+- 入力画像・denoiseのbindingを持つプロファイルでは、それらも解決できること
+- Sampler数とプロファイルの `multi_pass` 指定が一致すること
+- negative方式（`text` / `zeroed`）がプロファイルの宣言と一致すること
+- ワークフローが参照するモデルが `approved_models` に含まれること
+
+入力画像のbindingはアップロード後に解決されるため、`validate` ではプレースホルダ名で解決だけを試します。node_idやフィールド名が古くなっていれば、生成を始める前に失敗します。
 
 ## 生成例
 
@@ -181,6 +190,10 @@ uv run python cardgen.py --profile wai-single generate `
 ```
 
 `--width` と `--height` は同時に、64以上かつ8の倍数で指定します。Sampler設定は該当入力を持つ全Samplerノードへ適用されます。
+
+`--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
+
+`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires` と `wai-hires-latent` です。
 
 ## 承認済みCheckpointの切り替え
 
