@@ -246,6 +246,14 @@ uv run python -m licenses report
 
 モデルファイルを別名へ置き換えたり更新した場合は、生成前に再度 `sync` と厳格な `verify` を実行してください。
 
+## テスト
+
+`uv sync` で `dev` グループのpytestが入るため、追加指定なしで実行できます。ComfyUIへは接続しません。
+
+```powershell
+uv run python -m pytest
+```
+
 ## 安全上の境界
 
 - ComfyUIはlocalhost以外へ公開しない
