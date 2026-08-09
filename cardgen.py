@@ -1014,8 +1014,17 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             f"expected={expected_multi_pass}, detected={multi_pass_detected}"
         )
 
+    input_image_node: str | None = None
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
+        if "input_image" in bindings:
+            # generate uploads first and binds the returned name, so the binding
+            # itself is never resolved until a run is already underway. Resolve
+            # it here against a placeholder name to catch a stale node_id/field
+            # before the upload, not after.
+            input_image_node = set_bound_input_image(
+                probe, bindings, "validation-input.png"
+            )
     else:
         primary_id, primary_sampler = get_primary_sampler(probe)
         seed_field = set_sampler_seed(primary_sampler, 1)
@@ -1030,6 +1039,8 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "multi_pass_detected": multi_pass_detected,
         "primary_sampler": primary_id,
         "seed_field": seed_field,
+        "input_image_required": input_image_node is not None,
+        "input_image_node": input_image_node,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
         "zeroed_negative_nodes": zeroed_negative_nodes,

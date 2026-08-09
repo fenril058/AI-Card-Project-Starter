@@ -66,6 +66,28 @@ class CardGenTests(unittest.TestCase):
         self.assertFalse(summary["multi_pass_detected"])
         self.assertEqual(summary["sampler_count"], 1)
 
+    def test_input_image_binding_is_resolved_before_a_run(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-refine")
+        summary = cardgen.validate_profile_workflow(profile)
+        self.assertTrue(summary["input_image_required"])
+        self.assertIsNotNone(summary["input_image_node"])
+
+    def test_stale_input_image_binding_fails_validation(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-refine")
+        profile["bindings"] = copy.deepcopy(profile["bindings"])
+        profile["bindings"]["input_image"]["node_id"] = "9999"
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.validate_profile_workflow(profile)
+
+    def test_profiles_without_input_image_report_it(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        summary = cardgen.validate_profile_workflow(profile)
+        self.assertFalse(summary["input_image_required"])
+        self.assertIsNone(summary["input_image_node"])
+
     def test_checkpoint_override_requires_approval(self) -> None:
         workflow = {
             "1": {
