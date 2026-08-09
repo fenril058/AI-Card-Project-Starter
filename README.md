@@ -9,11 +9,15 @@ ComfyUI Portableを `127.0.0.1:8188` で動かし、承認済みモデルとAPI�
 ```text
 AI-Card-Project-Starter/
 ├─ cardgen.py                  # 検証・生成CLI
+├─ project_env.py              # .env の読み込み
 ├─ config/
-│  ├─ app.json                # 共通設定
-│  └─ profiles/*.json         # 生成パイプライン定義
-├─ workflows/approved/*.json  # 承認済みComfyUI APIワークフロー
-├─ licenses/                   # モデル出典・ライセンス・ハッシュ台帳
+│  ├─ app.json                 # 共通設定
+│  ├─ profiles/*.json          # 生成パイプライン定義
+│  └─ README.md                # プロファイルを分ける基準
+├─ workflows/approved/
+│  ├─ *.json                   # 承認済みComfyUI APIワークフロー
+│  └─ README.md                # ワークフローとプロファイルの対応
+├─ licenses/                   # モデル出典・ライセンス・ハッシュ台帳（CLI付き）
 ├─ tests/
 ├─ outputs/                    # Git追跡外の生成物と実行メタデータ
 ├─ .env.example
