@@ -255,7 +255,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 ## 出力と再現メタデータ
 
-画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 5です。
+画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 6です。
 
 主な記録内容:
 
@@ -268,6 +268,16 @@ uv run python cardgen.py --profile wai-single generate `
 - `app_config_sha256`、`profile_sha256`、`input_image_sha256`
 
 プロンプト、seed、入力画像名は重複・誤認を避けるため `node_inputs` から除外し、それぞれ専用フィールドへ記録します。モデルハッシュはサイズと更新時刻をキーに `.cache/model-hashes.json` へキャッシュされます。
+
+### 失敗した実行も記録する
+
+`--count 4` の3枚目で落ちた場合、1〜2枚目の画像は既に `outputs/` にあります。これらが記録なしで残ると、どのseedで、どのワークフローで、どの重みで生成されたのか追えません。そのため失敗時も同じ `*_metadata.json` を書き出します。
+
+- `status` — `"ok"` または `"error"`
+- `failure` — 成功時は `null`。失敗時は `error_type`、`message`、`failed_on_image`、`requested_count`
+- `results` — 完走した分だけが入る（1枚も無ければ空配列）
+
+例外は記録後に再送出されるため、終了コードは従来どおり1です。`METADATA:` 行は例外の送出前にstdoutへ出るので、標準出力を解析する呼び出し元も失敗した実行の記録を拾えます。Ctrl-Cやネットワーク断も同じ経路で記録されます。
 
 ## モデルライセンスとハッシュ台帳
 

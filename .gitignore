@@ -4,8 +4,6 @@ __pycache__/
 
 outputs/*
 !outputs/.gitkeep
-logs/*
-!logs/.gitkeep
 
 .env
 .env.*

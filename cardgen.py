@@ -1354,48 +1354,68 @@ def command_generate(
 
     results: list[dict[str, Any]] = []
     session_stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    for index in range(args.count):
-        current = copy.deepcopy(workflow)
-        seed = (
-            args.seed + index
-            if args.seed is not None
-            else secrets.randbelow(2**63 - 1)
-        )
-        if isinstance(bindings, dict):
-            set_bound_seed(current, bindings, seed)
-        else:
-            current_primary = current.get(primary_id)
-            if not isinstance(current_primary, dict):
-                raise CardGenError(f"Primary samplerが不正です: {primary_id}")
-            set_sampler_seed(current_primary, seed)
+    # A run that dies partway still leaves downloaded images in output_dir. Without
+    # a record they cannot be traced to a seed, a workflow or a set of weights, so
+    # the failure is written to the same metadata file a success would have used.
+    failure: dict[str, Any] | None = None
+    failure_exc: BaseException | None = None
+    try:
+        for index in range(args.count):
+            current = copy.deepcopy(workflow)
+            seed = (
+                args.seed + index
+                if args.seed is not None
+                else secrets.randbelow(2**63 - 1)
+            )
+            if isinstance(bindings, dict):
+                set_bound_seed(current, bindings, seed)
+            else:
+                current_primary = current.get(primary_id)
+                if not isinstance(current_primary, dict):
+                    raise CardGenError(f"Primary samplerが不正です: {primary_id}")
+                set_sampler_seed(current_primary, seed)
 
-        stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}_seed{seed}"
-        set_save_prefix(current, f"CardGen/{profile['id']}/{session_stamp}/{stem}")
-        prompt_id = queue_prompt(app, current)
-        print(
-            f"[{index + 1}/{args.count}] profile={profile['id']} "
-            f"queued={prompt_id} seed={seed}"
-        )
-        history = wait_for_history(app, prompt_id, timeout)
-        files = download_outputs(app, history, output_dir, stem)
-        if not files:
-            raise CardGenError("ComfyUI履歴にダウンロード可能な画像がありません。")
-        results.append(
-            {
-                "prompt_id": prompt_id,
-                "seed": seed,
-                "files": [project_relative(path) for path in files],
-                "file_sha256": [sha256_file(path) for path in files],
-                # The graph as queued, per seed. Two runs that differ only in a
-                # workflow edit are otherwise indistinguishable in the record.
-                "queued_workflow_sha256": sha256_json(current),
-            }
-        )
-        for path in files:
-            print(f"RESULT: {path}")
+            stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}_seed{seed}"
+            set_save_prefix(current, f"CardGen/{profile['id']}/{session_stamp}/{stem}")
+            prompt_id = queue_prompt(app, current)
+            print(
+                f"[{index + 1}/{args.count}] profile={profile['id']} "
+                f"queued={prompt_id} seed={seed}"
+            )
+            history = wait_for_history(app, prompt_id, timeout)
+            files = download_outputs(app, history, output_dir, stem)
+            if not files:
+                raise CardGenError("ComfyUI履歴にダウンロード可能な画像がありません。")
+            results.append(
+                {
+                    "prompt_id": prompt_id,
+                    "seed": seed,
+                    "files": [project_relative(path) for path in files],
+                    "file_sha256": [sha256_file(path) for path in files],
+                    # The graph as queued, per seed. Two runs that differ only in
+                    # a workflow edit are otherwise indistinguishable in the
+                    # record.
+                    "queued_workflow_sha256": sha256_json(current),
+                }
+            )
+            for path in files:
+                print(f"RESULT: {path}")
+    except BaseException as exc:  # noqa: BLE001 - recorded, then re-raised as-is
+        # Deliberately BaseException: a Ctrl-C or a socket error mid-run strands
+        # images just as surely as a CardGenError does. The exception is re-raised
+        # unchanged below, so exit codes and tracebacks are unaffected.
+        failure_exc = exc
+        failure = {
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+            "failed_on_image": len(results) + 1,
+            "requested_count": args.count,
+        }
 
     metadata = {
-        "schema_version": 5,
+        "schema_version": 6,
+        "status": "error" if failure is not None else "ok",
+        "failure": failure,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "app_config": project_relative(app["app_config_path"]),
         "app_config_sha256": sha256_file(app["app_config_path"]),
@@ -1415,6 +1435,8 @@ def command_generate(
             "height": args.height,
             "latent_nodes": latent_nodes,
             "sampler_nodes": sampler_overrides,
+            "denoise": args.denoise,
+            "denoise_node": denoise_node,
         },
         "prompt": args.prompt,
         "negative": negative,

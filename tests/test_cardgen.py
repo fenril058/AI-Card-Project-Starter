@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import copy
 import importlib.util
 import json
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -133,6 +135,83 @@ class CardGenTests(unittest.TestCase):
                     latent[node_id]["inputs"][field],
                     f"node {node_id} {field} differs between the hires profiles",
                 )
+
+    def _generate_args(self, **overrides: object) -> argparse.Namespace:
+        base = dict(
+            prompt="test prompt",
+            negative=None,
+            checkpoint=None,
+            input_image=None,
+            count=1,
+            seed=1000,
+            timeout=5,
+            width=None,
+            height=None,
+            steps=None,
+            cfg=None,
+            sampler_name=None,
+            scheduler=None,
+            denoise=None,
+        )
+        base.update(overrides)
+        return argparse.Namespace(**base)
+
+    def test_a_failed_run_still_writes_metadata(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        # Inside the project: project_relative() refuses paths outside it, and
+        # outputs/ is gitignored so nothing leaks into the tree.
+        with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
+            app["output_dir_path"] = Path(temp_dir)
+            boom = cardgen.CardGenError("ComfyUI execution error")
+            with unittest.mock.patch.object(
+                cardgen, "queue_prompt", side_effect=boom
+            ), unittest.mock.patch.object(cardgen, "comfy_versions", return_value={}):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.command_generate(
+                        self._generate_args(), app, "wai-hires"
+                    )
+
+            written = list(Path(temp_dir).glob("*_metadata.json"))
+            self.assertEqual(len(written), 1)
+            meta = json.loads(written[0].read_text(encoding="utf-8"))
+
+        self.assertEqual(meta["schema_version"], 6)
+        self.assertEqual(meta["status"], "error")
+        self.assertEqual(meta["results"], [])
+        self.assertEqual(meta["failure"]["error_type"], "CardGenError")
+        self.assertEqual(meta["failure"]["failed_on_image"], 1)
+        # The point of writing on failure is that the run stays traceable.
+        self.assertEqual(meta["profile"], "wai-hires")
+        self.assertTrue(meta["workflow_sha256"])
+
+    def test_a_successful_run_is_marked_ok(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
+            out = Path(temp_dir)
+            app["output_dir_path"] = out
+            image = out / "fake.png"
+            image.write_bytes(b"not really a png")
+            with unittest.mock.patch.object(
+                cardgen, "queue_prompt", return_value="pid-1"
+            ), unittest.mock.patch.object(
+                cardgen, "wait_for_history", return_value={}
+            ), unittest.mock.patch.object(
+                cardgen, "download_outputs", return_value=[image]
+            ), unittest.mock.patch.object(
+                cardgen, "comfy_versions", return_value={}
+            ):
+                code = cardgen.command_generate(
+                    self._generate_args(), app, "wai-hires"
+                )
+            self.assertEqual(code, 0)
+            meta = json.loads(
+                next(out.glob("*_metadata.json")).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(meta["status"], "ok")
+        self.assertIsNone(meta["failure"])
+        self.assertEqual(len(meta["results"]), 1)
+        self.assertEqual(meta["results"][0]["seed"], 1000)
 
     def test_checkpoint_override_requires_approval(self) -> None:
         workflow = {
