@@ -64,18 +64,21 @@ uv run python cardgen.py check
 uv run python cardgen.py profiles
 ```
 
-現在のプロファイルは次の6種類です。
+出力の `*` が既定プロファイルで、`config/app.json` の `default_profile` で切り替えます。
+
+現在のプロファイルは次の7種類です。
 
 | ID | 用途 | 入力画像 |
 |---|---|---|
 | `wai-hires` | WAI Illustrious SDXL、Hires Fix。既定プロファイル | 不要 |
+| `wai-hires-latent` | 同上。拡大をlatentで行う比較用 | 不要 |
 | `wai-single` | WAI Illustrious SDXL、Single Pass | 不要 |
 | `wai-controlnet` | Scribble ControlNet + Hires Fix | ラフ線画 |
 | `wai-refine` | 既存画像のアップスケール + ディテール調整 | 仕上げたい画像 |
 | `zimage` | Z-Image-Turbo | 不要 |
 | `flux2-klein-edit` | FLUX.2 Klein Baseによる参照編集 | 編集元画像 |
 
-`*` は `config/app.json` の既定プロファイルです。プロファイルはモデル単体ではなく、1種類の生成パイプラインを表します。
+プロファイルはモデル単体ではなく、1種類の生成パイプラインを表します。
 
 ## 検証
 
@@ -116,6 +119,32 @@ Single Passを使う場合:
 ```powershell
 uv run python cardgen.py --profile wai-single generate `
   --prompt "masterpiece, best quality, fantasy landscape"
+```
+
+### 拡大経路の比較（latent vs ピクセル）
+
+`wai-hires-latent` は `wai-hires` の拡大経路だけを差し替えた比較用プロファイルです。`wai-hires` はVAEDecode後にReal-ESRGANでピクセル拡大して戻しますが、こちらはlatentのまま `LatentUpscaleBy`（bislerp、1.5倍）で拡大します。最終解像度はどちらも1536x2016です。
+
+同じseedを渡すと2経路を直接比較できます。
+
+```powershell
+uv run python cardgen.py --profile wai-hires generate `
+  --prompt "masterpiece, best quality, 1girl, silver hair, fantasy armor" `
+  --seed 1000 --count 4
+
+uv run python cardgen.py --profile wai-hires-latent generate `
+  --prompt "masterpiece, best quality, 1girl, silver hair, fantasy armor" `
+  --seed 1000 --count 4
+```
+
+2nd passの `denoise` は両者とも0.45で揃えてあります。sampler設定も一致しているので、変数は拡大経路だけです。この一致はテストで固定してあります。
+
+`--denoise` で2nd passだけを振れます。
+
+```powershell
+uv run python cardgen.py --profile wai-hires-latent generate `
+  --prompt "masterpiece, best quality, 1girl, silver hair, fantasy armor" `
+  --seed 1000 --denoise 0.35
 ```
 
 `--negative` を省略するとプロファイルの既定値を使います。

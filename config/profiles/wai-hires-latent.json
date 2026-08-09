@@ -1,0 +1,30 @@
+{
+  "schema_version": 4,
+  "id": "wai-hires-latent",
+  "display_name": "WAI Illustrious SDXL (Hires Fix, latent upscale)",
+  "workflow": "workflows/approved/wai_sdxl_hires_latent_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": true
+  },
+  "bindings": {
+    "positive_prompt": { "node_id": "6", "field": "text" },
+    "negative_prompt": { "node_id": "7", "field": "text" },
+    "seed": { "node_id": "10", "field": "seed" },
+    "denoise": { "node_id": "12", "field": "denoise" }
+  },
+  "approved_models": {
+    "checkpoints": [
+      "waiIllustriousSDXL_v170.safetensors"
+    ],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "text, logo, watermark, low quality, malformed hands"
+  },
+  "_notes": "wai-hires との比較実験用。拡大経路だけが違う。wai-hires は VAEDecode 後に Real-ESRGAN でピクセル拡大して VAEEncode で戻すが、こちらは latent のまま LatentUpscaleBy (bislerp, 1.5倍) で拡大する。最終解像度はどちらも 1536x2016。2nd pass の denoise は wai-hires が 0.45、こちらが 0.40 で、--denoise の実行時上書きは無いためワークフロー側の値がそのまま効く。"
+}

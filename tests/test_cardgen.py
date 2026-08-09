@@ -117,6 +117,23 @@ class CardGenTests(unittest.TestCase):
             cardgen.set_bound_denoise(workflow, {}, 0.45)
         self.assertEqual(workflow["10"]["inputs"]["denoise"], 1.0)
 
+    def test_hires_pair_differs_only_in_the_upscale_path(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        pixel = cardgen.load_json(
+            cardgen.load_profile(app, "wai-hires")["workflow_path"]
+        )
+        latent = cardgen.load_json(
+            cardgen.load_profile(app, "wai-hires-latent")["workflow_path"]
+        )
+        # The comparison is only meaningful while every sampler setting matches.
+        for node_id in ("10", "12"):
+            for field in ("steps", "cfg", "sampler_name", "scheduler", "denoise"):
+                self.assertEqual(
+                    pixel[node_id]["inputs"][field],
+                    latent[node_id]["inputs"][field],
+                    f"node {node_id} {field} differs between the hires profiles",
+                )
+
     def test_checkpoint_override_requires_approval(self) -> None:
         workflow = {
             "1": {
