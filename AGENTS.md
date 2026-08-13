@@ -55,7 +55,7 @@ uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
 
 ## 実行記録（メタデータ）
 
-再現に必要な情報は `outputs/*_metadata.json` へ自動で残る。schema_version 5。
+再現に必要な情報は `outputs/*_metadata.json` へ自動で残る。schema_version 6。
 
 - `workflow_sha256` / `queued_workflow_sha256` — 前者はファイル、後者は実際に
   送信したグラフ。ワークフローを書き換えて比較実験をした場合、この2つが
@@ -65,6 +65,16 @@ uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
 - `comfyui` — ComfyUI・Python・PyTorchのバージョン
 - `results[].file_sha256` — 出力画像のSHA-256
 - `app_config_sha256` / `profile_sha256` / `input_image_sha256`
+- `status` / `failure` — 失敗した実行も同じ記録を残す。`status` は `"ok"` または
+  `"error"`。`failure` は成功時 `null`、失敗時は `error_type`・`message`・
+  `failed_on_image`・`requested_count` を持つ。
+
+`--count 4` の3枚目で落ちても1〜2枚目の画像は `outputs/` に残る。記録が無ければ
+どのseedで、どのワークフローで、どの重みで出た画像なのか後から追えない。だから
+失敗時も書き出す。`results` には完走した分だけが入る（1枚も無ければ空配列）。
+例外は記録後に再送出するため終了コードは変わらず、`METADATA:` 行は送出前に
+stdoutへ出るので、標準出力を解析する呼び出し元も失敗した実行を拾える。
+Ctrl-Cやネットワーク断も同じ経路で記録する。
 
 **`snapshot_node_inputs()` はノード種別を列挙しない。** 全ノードのリテラル入力を
 記録する。列挙方式にすると `SamplerCustomAdvanced` のように設定を自前で持たない
