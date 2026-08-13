@@ -17,6 +17,7 @@ AI-Card-Project-Starter/
 ├─ workflows/approved/
 │  ├─ *.json                   # 承認済みComfyUI APIワークフロー
 │  └─ README.md                # ワークフローとプロファイルの対応
+├─ docs/metadata-design.md     # メタデータ設計の背景と実例
 ├─ licenses/                   # モデル出典・ライセンス・ハッシュ台帳（CLI付き）
 ├─ tests/
 ├─ outputs/                    # Git追跡外の生成物と実行メタデータ
@@ -281,6 +282,8 @@ uv run python cardgen.py --profile wai-single generate `
 - `app_config_sha256`、`profile_sha256`、`input_image_sha256`
 
 プロンプト、seed、入力画像名は重複・誤認を避けるため `node_inputs` から除外し、それぞれ専用フィールドへ記録します。モデルハッシュはサイズと更新時刻をキーに `.cache/model-hashes.json` へキャッシュされます。
+
+なぜこの形なのか（全ノードを記録する理由、`sha256` と `weights_sha256` の使い分けなど）は [docs/metadata-design.md](docs/metadata-design.md) にあります。
 
 ### 失敗した実行も記録する
 
