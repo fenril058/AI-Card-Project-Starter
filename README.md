@@ -106,6 +106,8 @@ uv run python cardgen.py validate --all
 
 入力画像のbindingはアップロード後に解決されるため、`validate` ではプレースホルダ名で解決だけを試します。node_idやフィールド名が古くなっていれば、生成を始める前に失敗します。
 
+Claude Codeが `config/` または `workflows/approved/` のJSONを編集した場合は、PostToolUseフック（[.claude/hooks/validate_on_config_change.py](.claude/hooks/validate_on_config_change.py)）が `validate --all` を自動実行します。失敗するとその場でエラーが差し戻されます。手で編集したときは自分で `validate` を実行してください。
+
 ## 生成例
 
 ### WAI Hires Fix
