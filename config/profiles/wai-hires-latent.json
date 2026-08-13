@@ -26,5 +26,5 @@
   "defaults": {
     "negative_prompt": "text, logo, watermark, low quality, malformed hands"
   },
-  "_notes": "wai-hires との比較実験用。拡大経路だけが違う。wai-hires は VAEDecode 後に Real-ESRGAN でピクセル拡大して VAEEncode で戻すが、こちらは latent のまま LatentUpscaleBy (bislerp, 1.5倍) で拡大する。最終解像度はどちらも 1536x2016。2nd pass の denoise は wai-hires が 0.45、こちらが 0.40 で、--denoise の実行時上書きは無いためワークフロー側の値がそのまま効く。"
+  "_notes": "wai-hires との比較実験用。拡大経路だけが違う。wai-hires は VAEDecode 後に Real-ESRGAN でピクセル拡大して VAEEncode で戻すが、こちらは latent のまま LatentUpscaleBy (bislerp, 1.5倍) で拡大する。最終解像度はどちらも 1536x2016。2nd pass の denoise も両者 0.45 で揃えてあり、sampler 設定と併せて tests/test_cardgen.py が一致を固定している。denoise を振るときはワークフローを書き換えず --denoise を使う。bindings.denoise が指す node 12 だけが動くので、比較の前提は崩れない。"
 }

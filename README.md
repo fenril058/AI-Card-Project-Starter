@@ -177,6 +177,15 @@ uv run python cardgen.py --profile wai-refine generate `
 
 入力画像はあらかじめ目的の縦横比へクロップしてください。このプロファイルは構図変更ではなく、アップスケールと軽いディテール追加を目的とします。
 
+既定の `denoise` は0.35です。これは構図を保つ値であって、顔を保つ値ではありません。元絵の顔を残したい場合は `--denoise` で下げてください。
+
+```powershell
+uv run python cardgen.py --profile wai-refine generate `
+  --prompt "Preserve the composition and add clean print-ready detail" `
+  --input-image "C:\path\to\private-project\art\source.png" `
+  --denoise 0.25
+```
+
 ### Z-Image-Turbo
 
 ```powershell
@@ -226,7 +235,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 `--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
 
-`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires` と `wai-hires-latent` です。
+`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine` です。
 
 ## 承認済みCheckpointの切り替え
 
