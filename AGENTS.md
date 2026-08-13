@@ -20,23 +20,19 @@
 uv run python cardgen.py profiles
 uv run python cardgen.py check
 uv run python cardgen.py validate
-uv run python cardgen.py --profile zimage validate
+uv run python cardgen.py --profile <id> validate
 uv run python cardgen.py validate --all
 ```
 
 ## 許可された生成経路
 
-WAI:
+`config/profiles/` にある承認済みプロファイルを指定して実行する。
 
 ```powershell
-uv run python cardgen.py --profile wai-hires generate --prompt "..." --negative "..." --count 1
+uv run python cardgen.py --profile <id> generate --prompt "..." --negative "..." --count 1
 ```
 
-Z-Image-Turbo:
-
-```powershell
-uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
-```
+IDの一覧は `cardgen.py profiles`、各プロファイルの用途と入力画像の要否はREADMEの「生成プロファイル」にある。`--input-image` を取るプロファイルでは、ユーザーが明示した絶対パスだけを渡す。
 
 ## 運用規則
 
