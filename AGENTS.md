@@ -20,23 +20,19 @@
 uv run python cardgen.py profiles
 uv run python cardgen.py check
 uv run python cardgen.py validate
-uv run python cardgen.py --profile zimage validate
+uv run python cardgen.py --profile <id> validate
 uv run python cardgen.py validate --all
 ```
 
 ## 許可された生成経路
 
-WAI:
+`config/profiles/` にある承認済みプロファイルを指定して実行する。
 
 ```powershell
-uv run python cardgen.py --profile wai-hires generate --prompt "..." --negative "..." --count 1
+uv run python cardgen.py --profile <id> generate --prompt "..." --negative "..." --count 1
 ```
 
-Z-Image-Turbo:
-
-```powershell
-uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
-```
+IDの一覧は `cardgen.py profiles`、各プロファイルの用途と入力画像の要否はREADMEの「生成プロファイル」にある。`--input-image` を取るプロファイルでは、ユーザーが明示した絶対パスだけを渡す。
 
 ## 運用規則
 
@@ -55,47 +51,15 @@ uv run python cardgen.py --profile zimage generate --prompt "..." --count 1
 
 ## 実行記録（メタデータ）
 
-再現に必要な情報は `outputs/*_metadata.json` へ自動で残る。schema_version 5。
+`outputs/*_metadata.json` は `cardgen.py` が自動で書く。記録内容はREADMEの「出力と再現メタデータ」を見る。
 
-- `workflow_sha256` / `queued_workflow_sha256` — 前者はファイル、後者は実際に
-  送信したグラフ。ワークフローを書き換えて比較実験をした場合、この2つが
-  なければ後から群を区別できない。
-- `generation_settings.node_inputs` — 全ノードのリテラル入力
-- `model_files` — 使用した重みファイルのSHA-256とサイズ、および `weights_sha256`
-- `comfyui` — ComfyUI・Python・PyTorchのバージョン
-- `results[].file_sha256` — 出力画像のSHA-256
-- `app_config_sha256` / `profile_sha256` / `input_image_sha256`
+失敗した実行にも同じファイルが残る。エラー終了を「記録が無い」と報告しない。`status` と `failure` を読み、途中まで出た画像を報告する。
 
-**`snapshot_node_inputs()` はノード種別を列挙しない。** 全ノードのリテラル入力を
-記録する。列挙方式にすると `SamplerCustomAdvanced` のように設定を自前で持たない
-ノードを使うワークフローで cfg・steps・sampler がまるごと記録から抜ける。
-FLUX.2のグラフで実際に抜けていた。新しいノード種別を足すたびに同じ穴が空く方式は
-採用しない。
+`cardgen.py` の記録処理を変更するときの制約:
 
-記録対象外は3つ。プロンプト本文（`prompt`/`negative` に別途ある）、seed
-（`results` にある。テンプレート側の値は古いため記録すると誤解を招く）、
-入力画像名（呼び出し元のprivateプロジェクトに属する）。
+- `snapshot_node_inputs()` でノード種別を列挙しない。全ノードのリテラル入力を記録する。
+- モデルの同定に全体 `sha256` を使わない。配布元と突き合わせるときは `weights_sha256` を使う。
+- `safetensors_weight_identity()` を例外送出へ変えない。判定できない入力は `null` を返す。
+- モデルのハッシュ元は環境変数 `CARDGEN_COMFYUI_MODELS_DIR` で渡す。マシン固有のパスを `config/app.json` へ書かない。
 
-`model_files` のハッシュには ComfyUI の models ディレクトリが必要。パスは
-マシン固有なので、コミットされる `config/app.json` ではなく環境変数
-`CARDGEN_COMFYUI_MODELS_DIR` で渡す。未設定なら空リストになり生成は続行する。
-ハッシュは `.cache/model-hashes.json` に (size, mtime) で キャッシュする。
-
-### ファイル全体のSHA-256でモデルを同定しないこと
-
-`sha256` はファイル全体のハッシュで、**safetensorsヘッダのパディング1つで変わる**。
-WAI v17 を Civitai からダウンロードしたファイルは、Civitai が掲載している
-SHA-256 と一致しないが、重みは同一だった。差はヘッダの `__spacer` フィールド。
-
-配布元と突き合わせるときは `weights_sha256` を使う。safetensors ヘッダの
-`modelspec.hash_sha256` から読み、Civitai の `AutoV3` と直接比較できる。
-`0x` 接頭辞は正規化して除去してある。
-
-`safetensors_weight_identity()` は例外を投げない。modelspec を持たない
-safetensors、`.pth` のような別形式、壊れたヘッダはすべて `null` を返す。
-**持っていない情報を持っているかのように記録しない**ため。生成は止めない。
-
-用途の使い分け:
-
-- `sha256` — 同じファイルで再現したかの判定に使う
-- `weights_sha256` — 配布元との同一性の主張に使う
+これら4つの理由と実例は [docs/metadata-design.md](docs/metadata-design.md)。仕様を変える前に読む。

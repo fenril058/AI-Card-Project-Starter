@@ -17,6 +17,7 @@ AI-Card-Project-Starter/
 ├─ workflows/approved/
 │  ├─ *.json                   # 承認済みComfyUI APIワークフロー
 │  └─ README.md                # ワークフローとプロファイルの対応
+├─ docs/metadata-design.md     # メタデータ設計の背景と実例
 ├─ licenses/                   # モデル出典・ライセンス・ハッシュ台帳（CLI付き）
 ├─ tests/
 ├─ outputs/                    # Git追跡外の生成物と実行メタデータ
@@ -105,6 +106,8 @@ uv run python cardgen.py validate --all
 
 入力画像のbindingはアップロード後に解決されるため、`validate` ではプレースホルダ名で解決だけを試します。node_idやフィールド名が古くなっていれば、生成を始める前に失敗します。
 
+Claude Codeが `config/` または `workflows/approved/` のJSONを編集した場合は、PostToolUseフック（[.claude/hooks/validate_on_config_change.py](.claude/hooks/validate_on_config_change.py)）が `validate --all` を自動実行します。失敗するとその場でエラーが差し戻されます。手で編集したときは自分で `validate` を実行してください。
+
 ## 生成例
 
 ### WAI Hires Fix
@@ -177,6 +180,15 @@ uv run python cardgen.py --profile wai-refine generate `
 
 入力画像はあらかじめ目的の縦横比へクロップしてください。このプロファイルは構図変更ではなく、アップスケールと軽いディテール追加を目的とします。
 
+既定の `denoise` は0.35です。これは構図を保つ値であって、顔を保つ値ではありません。元絵の顔を残したい場合は `--denoise` で下げてください。
+
+```powershell
+uv run python cardgen.py --profile wai-refine generate `
+  --prompt "Preserve the composition and add clean print-ready detail" `
+  --input-image "C:\path\to\private-project\art\source.png" `
+  --denoise 0.25
+```
+
 ### Z-Image-Turbo
 
 ```powershell
@@ -226,7 +238,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 `--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
 
-`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires` と `wai-hires-latent` です。
+`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine` です。
 
 ## 承認済みCheckpointの切り替え
 
@@ -272,6 +284,8 @@ uv run python cardgen.py --profile wai-single generate `
 - `app_config_sha256`、`profile_sha256`、`input_image_sha256`
 
 プロンプト、seed、入力画像名は重複・誤認を避けるため `node_inputs` から除外し、それぞれ専用フィールドへ記録します。モデルハッシュはサイズと更新時刻をキーに `.cache/model-hashes.json` へキャッシュされます。
+
+なぜこの形なのか（全ノードを記録する理由、`sha256` と `weights_sha256` の使い分けなど）は [docs/metadata-design.md](docs/metadata-design.md) にあります。
 
 ### 失敗した実行も記録する
 

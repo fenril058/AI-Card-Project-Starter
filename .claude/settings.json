@@ -40,5 +40,20 @@
       "Bash(rm:*)",
       "Bash(git push:*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python .claude/hooks/validate_on_config_change.py",
+            "timeout": 120,
+            "statusMessage": "承認済み設定を検証中"
+          }
+        ]
+      }
+    ]
   }
 }
