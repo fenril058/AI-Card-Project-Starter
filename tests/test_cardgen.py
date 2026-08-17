@@ -60,6 +60,40 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(summary["primary_sampler"], "73")
         self.assertEqual(summary["seed_field"], "noise_seed")
 
+    def test_esrgan_upscale_profile_validates_without_a_sampler(self) -> None:
+        """拡大だけのワークフローは prompt も seed も Sampler も持たない。
+
+        cardgen は元々どれも必須にしていたので、3箇所を緩めてある。ここが通らなく
+        なったら、決定的な工程を ComfyUI へ寄せる経路が閉じたということ。
+        """
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "esrgan-upscale")
+        summary = cardgen.validate_profile_workflow(profile)
+        self.assertEqual(summary["sampler_count"], 0)
+        self.assertIsNone(summary["primary_sampler"])
+        self.assertIsNone(summary["seed_field"])
+        self.assertEqual(summary["positive_prompt_nodes"], [])
+        self.assertTrue(summary["input_image_required"])
+
+    def test_seed_binding_is_optional_but_a_broken_one_is_not(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "esrgan-upscale")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(cardgen.set_bound_seed(workflow, {}, 1), (None, None))
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.set_bound_seed(workflow, {"seed": "30"}, 1)
+
+    def test_prompt_bindings_are_all_or_nothing(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "esrgan-upscale")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(cardgen.set_bound_prompts(workflow, {}, "p", "n"), ([], [], []))
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.set_bound_prompts(
+                workflow, {"positive_prompt": {"node_id": "90", "field": "filename_prefix"}},
+                "p", "n",
+            )
+
     def test_zimage_profile_validates(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
         profile = cardgen.load_profile(app, "zimage")

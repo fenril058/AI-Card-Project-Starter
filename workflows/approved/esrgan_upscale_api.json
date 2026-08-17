@@ -1,0 +1,29 @@
+{
+  "30": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "placeholder.png",
+      "upload": "image"
+    }
+  },
+  "21": {
+    "class_type": "UpscaleModelLoader",
+    "inputs": {
+      "model_name": "RealESRGAN_x4plus_anime_6B.pth"
+    }
+  },
+  "22": {
+    "class_type": "ImageUpscaleWithModel",
+    "inputs": {
+      "upscale_model": ["21", 0],
+      "image": ["30", 0]
+    }
+  },
+  "90": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "esrgan-upscale",
+      "images": ["22", 0]
+    }
+  }
+}
