@@ -170,6 +170,70 @@ class CardGenTests(unittest.TestCase):
                     f"node {node_id} {field} differs between the hires profiles",
                 )
 
+    def test_documented_override_matrix_holds(self) -> None:
+        """Pin which profiles accept --denoise, --width/--height and --steps.
+
+        docs/profiles-explained.md prints this matrix and tells readers that an
+        option with nowhere to land is an error rather than a silent no-op.
+        Widening any cell (teaching --steps to reach Flux2Scheduler, say) must
+        fail here so the document is corrected in the same change.
+        """
+        # profile -> (denoise node, latent nodes, steps nodes). None means the
+        # option is refused for that profile.
+        expected: dict[str, tuple[str | None, list[str] | None, list[str] | None]] = {
+            "wai-hires": ("12", ["5"], ["10", "12"]),
+            "wai-hires-latent": ("12", ["5"], ["10", "12"]),
+            "wai-single": (None, ["5"], ["10"]),
+            "zimage": (None, ["57:13"], ["57:3"]),
+            "wai-refine": ("12", None, ["12"]),
+            # steps and cfg live outside the sampler node, so neither override
+            # has anywhere to land. --width moves the latent but not the
+            # width/height Flux2Scheduler carries of its own.
+            "flux2-klein-edit": (None, ["66"], None),
+            "esrgan-upscale": (None, None, None),
+            "wai-controlnet": (None, ["5"], ["10", "12"]),
+        }
+
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profiles_dir = app["profiles_dir_path"]
+        self.assertEqual(
+            sorted(expected),
+            sorted(path.stem for path in profiles_dir.glob("*.json")),
+            "a profile was added or removed; update the matrix and the document",
+        )
+
+        for profile_id, (denoise, latents, steps) in expected.items():
+            profile = cardgen.load_profile(app, profile_id)
+            raw_bindings = profile.get("bindings")
+            bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
+
+            with self.subTest(profile=profile_id, option="--denoise"):
+                workflow = cardgen.load_json(profile["workflow_path"])
+                if denoise is None:
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.set_bound_denoise(workflow, bindings, 0.5)
+                else:
+                    node_id = cardgen.set_bound_denoise(workflow, bindings, 0.5)
+                    self.assertEqual(node_id, denoise)
+
+            with self.subTest(profile=profile_id, option="--width/--height"):
+                workflow = cardgen.load_json(profile["workflow_path"])
+                if latents is None:
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.apply_latent_size(workflow, 832, 1216)
+                else:
+                    changed = cardgen.apply_latent_size(workflow, 832, 1216)
+                    self.assertEqual(changed, latents)
+
+            with self.subTest(profile=profile_id, option="--steps"):
+                workflow = cardgen.load_json(profile["workflow_path"])
+                if steps is None:
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.apply_sampler_params(workflow, {"steps": 40})
+                else:
+                    changed = cardgen.apply_sampler_params(workflow, {"steps": 40})
+                    self.assertEqual(changed["steps"], steps)
+
     def _generate_args(self, **overrides: object) -> argparse.Namespace:
         base = dict(
             prompt="test prompt",
