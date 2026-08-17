@@ -535,12 +535,15 @@ def upload_input_image(app: dict[str, Any], image_path: Path) -> str:
     return str(Path(subfolder) / name) if subfolder else name
 
 
-def sampler_nodes(workflow: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+def sampler_nodes(
+    workflow: dict[str, Any], *, required: bool = True
+) -> list[tuple[str, dict[str, Any]]]:
+    """required=False は拡大だけのワークフロー用。サンプラーが無くても空で返す。"""
     result: list[tuple[str, dict[str, Any]]] = []
     for node_id, node in workflow.items():
         if isinstance(node, dict) and node.get("class_type") in SAMPLER_TYPES:
             result.append((str(node_id), node))
-    if not result:
+    if not result and required:
         raise CardGenError("対応済みSamplerが見つかりません。")
     return result
 
@@ -669,8 +672,13 @@ def set_bound_prompts(
 ) -> tuple[list[str], list[str], list[str]]:
     positive_binding = bindings.get("positive_prompt")
     negative_binding = bindings.get("negative_prompt")
+    if positive_binding is None and negative_binding is None:
+        # 条件付けを持たないワークフロー（拡大だけの工程など）。書き込む先が無い。
+        return [], [], []
     if not isinstance(positive_binding, dict) or not isinstance(negative_binding, dict):
-        raise CardGenError("bindingsのpositive_prompt/negative_promptが必要です。")
+        raise CardGenError(
+            "bindingsのpositive_prompt/negative_promptは両方書くか、両方省くかのどちらかです。"
+        )
     positive_id, positive_node, positive_field = bound_node(
         workflow, positive_binding, "positive_prompt"
     )
@@ -684,10 +692,17 @@ def set_bound_prompts(
 
 def set_bound_seed(
     workflow: dict[str, Any], bindings: dict[str, Any], seed: int
-) -> tuple[str, str]:
+) -> tuple[str | None, str | None]:
+    """seed の binding が無いプロファイルでは何もしない。
+
+    拡大だけの工程は決定的で、同じ入力からは常に同じ出力が出る。seed を書く先が
+    無いのは設定の誤りではない。
+    """
     binding = bindings.get("seed")
+    if binding is None:
+        return None, None
     if not isinstance(binding, dict):
-        raise CardGenError("bindings.seedが必要です。")
+        raise CardGenError("bindings.seedが不正です。")
     node_id, node, field = bound_node(workflow, binding, "seed")
     node["inputs"][field] = seed
     return node_id, field
@@ -891,7 +906,7 @@ def describe_generation_settings(workflow: dict[str, Any]) -> dict[str, Any]:
         )
 
     samplers: list[dict[str, Any]] = []
-    for node_id, node in sampler_nodes(workflow):
+    for node_id, node in sampler_nodes(workflow, required=False):
         inputs = node.get("inputs")
         if not isinstance(inputs, dict):
             continue
@@ -1019,7 +1034,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             probe, "validation positive prompt", "validation negative prompt"
         )
     negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
-    sampler_count = len(sampler_nodes(workflow))
+    sampler_count = len(sampler_nodes(workflow, required=False))
     # Sampler count alone cannot tell a refiner from a hires pass; it only says
     # the graph denoises more than once.
     multi_pass_detected = sampler_count > 1
@@ -1302,13 +1317,18 @@ def command_generate(
     if not isinstance(negative, str):
         raise CardGenError("negative promptが不正です。")
 
+    needs_prompt = not isinstance(bindings, dict) or "positive_prompt" in bindings
+    if needs_prompt and args.prompt is None:
+        raise CardGenError("このプロファイルには--promptが必要です。")
+    positive = args.prompt or ""
+
     if isinstance(bindings, dict):
         _, negative_nodes, zeroed_negative_nodes = set_bound_prompts(
-            workflow, bindings, args.prompt, negative
+            workflow, bindings, positive, negative
         )
     else:
         _, negative_nodes, zeroed_negative_nodes = set_all_sampler_prompts(
-            workflow, args.prompt, negative
+            workflow, positive, negative
         )
     negative_mode = detect_negative_mode(negative_nodes, zeroed_negative_nodes)
     if negative_mode in {"zeroed", "mixed"} and negative.strip():
@@ -1332,6 +1352,11 @@ def command_generate(
 
     if isinstance(bindings, dict):
         primary_id, _ = set_bound_seed(workflow, bindings, 1)
+        if primary_id is None and args.count != 1:
+            raise CardGenError(
+                "このプロファイルはseedを持たないので、--countは1だけです。"
+                "同じ入力からは常に同じ出力が出ます。"
+            )
         if args.input_image is not None:
             image_path = resolve_external_input_path(args.input_image)
             uploaded_name = upload_input_image(app, image_path)
@@ -1368,19 +1393,24 @@ def command_generate(
                 else secrets.randbelow(2**63 - 1)
             )
             if isinstance(bindings, dict):
-                set_bound_seed(current, bindings, seed)
+                bound_seed_node, _ = set_bound_seed(current, bindings, seed)
+                if bound_seed_node is None:
+                    # seed を書く先が無い工程。乱数を名前や記録へ残すと、
+                    # 再現に要らない値が要るように見える。
+                    seed = None
             else:
                 current_primary = current.get(primary_id)
                 if not isinstance(current_primary, dict):
                     raise CardGenError(f"Primary samplerが不正です: {primary_id}")
                 set_sampler_seed(current_primary, seed)
 
-            stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}_seed{seed}"
+            suffix = f"_seed{seed}" if seed is not None else ""
+            stem = f"{profile['id']}_{session_stamp}_{index + 1:02d}{suffix}"
             set_save_prefix(current, f"CardGen/{profile['id']}/{session_stamp}/{stem}")
             prompt_id = queue_prompt(app, current)
             print(
                 f"[{index + 1}/{args.count}] profile={profile['id']} "
-                f"queued={prompt_id} seed={seed}"
+                f"queued={prompt_id}" + (f" seed={seed}" if seed is not None else "")
             )
             history = wait_for_history(app, prompt_id, timeout)
             files = download_outputs(app, history, output_dir, stem)
@@ -1495,7 +1525,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="プロファイルID（サブコマンド後にも指定可能）",
     )
-    generate.add_argument("--prompt", required=True, help="ポジティブプロンプト")
+    generate.add_argument(
+        "--prompt",
+        help="ポジティブプロンプト。prompt の binding を持つプロファイルでは必須",
+    )
     generate.add_argument(
         "--negative",
         default=None,

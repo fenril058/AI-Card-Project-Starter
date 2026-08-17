@@ -16,6 +16,15 @@ ComfyUIで生成成功したワークフローを **API形式** で書き出し�
 | `wai_sdxl_refine_api.json` | `wai-refine` | 既存画像のアップスケール + ディテール調整 |
 | `z_image_turbo_api.json` | `zimage` | Z-Image-Turbo。negativeは `ConditioningZeroOut` |
 | `flux2_klein_4b_edit_api.json` | `flux2-klein-edit` | FLUX.2 Klein Baseによる参照編集 |
+| `esrgan_upscale_api.json` | `esrgan-upscale` | Real-ESRGANで4倍にするだけ。**Samplerを持たない** |
+
+`esrgan_upscale_api.json` だけ Sampler も条件付けノードも持ちません。拡散を通さない
+決定的な工程なので、`bindings` は `input_image` だけで、prompt も seed も持ちません。
+**`--count` は 1 のみです**（同じ入力からは常に同じ出力が出るため）。
+
+この経路のために `cardgen.py` の3箇所を緩めてあります（`sampler_nodes` の
+`required`、`set_bound_prompts` と `set_bound_seed` の binding 省略）。
+`tests/test_cardgen.py` が固定しているので、閉じたらテストで気づけます。
 
 `wai_sdxl_hires_api.json` と `wai_sdxl_hires_latent_api.json` は拡大経路だけが違い、
 最終解像度はどちらも1536x2016、sampler設定と2nd passの `denoise` (0.45) も一致します。
