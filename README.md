@@ -85,6 +85,9 @@ uv run python cardgen.py profiles
 
 プロファイルはモデル単体ではなく、1種類の生成パイプラインを表します。
 
+各プロファイルが何を入力に取り、途中で何が起き、出力がどう変わるかは
+[docs/profiles-explained.md](docs/profiles-explained.md) にあります。
+
 ## 検証
 
 既定プロファイル、個別プロファイル、全プロファイルをそれぞれ検証できます。
