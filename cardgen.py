@@ -856,14 +856,37 @@ def apply_latent_size(
     return sorted(changed)
 
 
+def sampler_param_option(field: str) -> str:
+    return "--" + field.replace("sampler_name", "sampler").replace("_", "-")
+
+
 def apply_sampler_params(
-    workflow: dict[str, Any], params: dict[str, Any]
+    workflow: dict[str, Any],
+    params: dict[str, Any],
+    bindings: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
-    """Overwrite sampler inputs on every sampler node that exposes them."""
+    """Overwrite sampler inputs, preferring the node a profile names.
+
+    Writing every sampler that exposes the field is right for a graph whose
+    samplers carry their own settings: a hires pair wants both passes moved
+    together. It has nowhere to land when the setting lives outside the sampler.
+    FLUX.2 keeps steps in Flux2Scheduler, cfg in CFGGuider and sampler_name in
+    KSamplerSelect, leaving SamplerCustomAdvanced with links alone, so --steps
+    used to fail on a graph that plainly has steps. A profile may therefore name
+    one node per field, the way bindings.denoise already does.
+    """
+    bound = bindings if isinstance(bindings, dict) else {}
     changed: dict[str, list[str]] = {}
     for field in SAMPLER_OVERRIDE_FIELDS:
         value = params.get(field)
         if value is None:
+            continue
+
+        binding = bound.get(field)
+        if binding is not None:
+            node_id, node, bound_field = bound_node(workflow, binding, field)
+            node["inputs"][bound_field] = value
+            changed[field] = [node_id]
             continue
 
         nodes: list[str] = []
@@ -874,9 +897,10 @@ def apply_sampler_params(
                 nodes.append(node_id)
 
         if not nodes:
-            option = "--" + field.replace("sampler_name", "sampler").replace("_", "-")
             raise CardGenError(
-                f"{option}を適用できるSampler入力がこのワークフローにありません。"
+                f"{sampler_param_option(field)}を適用できるSampler入力が"
+                "このワークフローにありません。"
+                f"対応させるにはプロファイルへbindings.{field}を追加してください。"
             )
         changed[field] = sorted(nodes)
     return changed
@@ -1055,8 +1079,16 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
 
     input_image_node: str | None = None
     denoise_node: str | None = None
+    sampler_param_nodes: dict[str, str] = {}
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
+        for field in SAMPLER_OVERRIDE_FIELDS:
+            if field not in bindings:
+                continue
+            # Resolve only. validate has no value to write, and the node need
+            # not be a sampler: FLUX.2 keeps steps and cfg outside it.
+            node_id, _, _ = bound_node(probe, bindings[field], field)
+            sampler_param_nodes[field] = node_id
         if "denoise" in bindings:
             # Resolve only: bound_node raises on a stale node_id or field, and
             # validate has no denoise to write. The workflow's own value stands.
@@ -1086,6 +1118,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "input_image_required": input_image_node is not None,
         "input_image_node": input_image_node,
         "denoise_node": denoise_node,
+        "sampler_param_nodes": sampler_param_nodes,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
         "zeroed_negative_nodes": zeroed_negative_nodes,
@@ -1304,8 +1337,10 @@ def command_generate(
             "sampler_name": args.sampler_name,
             "scheduler": args.scheduler,
         },
+        bindings if isinstance(bindings, dict) else None,
     )
-    if args.steps is not None and len(sampler_nodes(workflow)) > 1:
+    # A bound field lands on one node, so the warning belongs to the blanket path.
+    if len(sampler_overrides.get("steps", [])) > 1:
         print(
             "NOTE: このワークフローには複数のSamplerがあります。--stepsは全Samplerへ"
             "適用されますが、start_at_step/end_at_stepの分割点は変更しません。"

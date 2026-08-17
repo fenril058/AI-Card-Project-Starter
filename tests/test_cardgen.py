@@ -17,6 +17,13 @@ assert SPEC and SPEC.loader
 cardgen = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cardgen)
 
+SAMPLER_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
+
+
+def every_sampler_field(nodes: list[str] | None) -> dict[str, list[str] | None]:
+    """One expectation shared by all four sampler options."""
+    return {field: nodes for field in SAMPLER_FIELDS}
+
 
 class CardGenTests(unittest.TestCase):
     def test_public_repository_tracks_no_input_or_image_assets(self) -> None:
@@ -171,27 +178,46 @@ class CardGenTests(unittest.TestCase):
                 )
 
     def test_documented_override_matrix_holds(self) -> None:
-        """Pin which profiles accept --denoise, --width/--height and --steps.
+        """Pin where each override lands, per profile.
 
         docs/profiles-explained.md prints this matrix and tells readers that an
         option with nowhere to land is an error rather than a silent no-op.
-        Widening any cell (teaching --steps to reach Flux2Scheduler, say) must
-        fail here so the document is corrected in the same change.
+        Moving any cell must fail here so the document is corrected in the same
+        change. The sampler fields are resolved with the profile's bindings, the
+        way command_generate does; without them this only exercises the blanket
+        path and says nothing about what --steps actually does.
         """
-        # profile -> (denoise node, latent nodes, steps nodes). None means the
-        # option is refused for that profile.
-        expected: dict[str, tuple[str | None, list[str] | None, list[str] | None]] = {
-            "wai-hires": ("12", ["5"], ["10", "12"]),
-            "wai-hires-latent": ("12", ["5"], ["10", "12"]),
-            "wai-single": (None, ["5"], ["10"]),
-            "zimage": (None, ["57:13"], ["57:3"]),
-            "wai-refine": ("12", None, ["12"]),
-            # steps and cfg live outside the sampler node, so neither override
-            # has anywhere to land. --width moves the latent but not the
-            # width/height Flux2Scheduler carries of its own.
-            "flux2-klein-edit": (None, ["66"], None),
-            "esrgan-upscale": (None, None, None),
-            "wai-controlnet": (None, ["5"], ["10", "12"]),
+        sample = {
+            "steps": 40,
+            "cfg": 3.5,
+            "sampler_name": "dpmpp_2m",
+            "scheduler": "karras",
+        }
+        # profile -> (denoise node, latent nodes, sampler field -> nodes).
+        # None means the option is refused for that profile.
+        expected: dict[
+            str, tuple[str | None, list[str] | None, dict[str, list[str] | None]]
+        ] = {
+            "wai-hires": ("12", ["5"], every_sampler_field(["10", "12"])),
+            "wai-hires-latent": ("12", ["5"], every_sampler_field(["10", "12"])),
+            "wai-single": (None, ["5"], every_sampler_field(["10"])),
+            "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
+            "wai-refine": ("12", None, every_sampler_field(["12"])),
+            # FLUX.2 keeps each setting in its own node, so the profile binds
+            # them one by one. Nothing carries a scheduler name. --width moves
+            # the latent but not the width/height Flux2Scheduler holds itself.
+            "flux2-klein-edit": (
+                None,
+                ["66"],
+                {
+                    "steps": ["62"],
+                    "cfg": ["63"],
+                    "sampler_name": ["61"],
+                    "scheduler": None,
+                },
+            ),
+            "esrgan-upscale": (None, None, every_sampler_field(None)),
+            "wai-controlnet": (None, ["5"], every_sampler_field(["10", "12"])),
         }
 
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
@@ -201,8 +227,13 @@ class CardGenTests(unittest.TestCase):
             sorted(path.stem for path in profiles_dir.glob("*.json")),
             "a profile was added or removed; update the matrix and the document",
         )
+        self.assertEqual(
+            sorted(SAMPLER_FIELDS),
+            sorted(cardgen.SAMPLER_OVERRIDE_FIELDS),
+            "an override field was added; update the matrix and the document",
+        )
 
-        for profile_id, (denoise, latents, steps) in expected.items():
+        for profile_id, (denoise, latents, sampler_fields) in expected.items():
             profile = cardgen.load_profile(app, profile_id)
             raw_bindings = profile.get("bindings")
             bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
@@ -225,14 +256,44 @@ class CardGenTests(unittest.TestCase):
                     changed = cardgen.apply_latent_size(workflow, 832, 1216)
                     self.assertEqual(changed, latents)
 
-            with self.subTest(profile=profile_id, option="--steps"):
-                workflow = cardgen.load_json(profile["workflow_path"])
-                if steps is None:
-                    with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_sampler_params(workflow, {"steps": 40})
-                else:
-                    changed = cardgen.apply_sampler_params(workflow, {"steps": 40})
-                    self.assertEqual(changed["steps"], steps)
+            self.assertEqual(sorted(sampler_fields), sorted(SAMPLER_FIELDS))
+            for field, nodes in sampler_fields.items():
+                with self.subTest(profile=profile_id, option=field):
+                    workflow = cardgen.load_json(profile["workflow_path"])
+                    params = {field: sample[field]}
+                    if nodes is None:
+                        with self.assertRaises(cardgen.CardGenError):
+                            cardgen.apply_sampler_params(workflow, params, bindings)
+                    else:
+                        changed = cardgen.apply_sampler_params(
+                            workflow, params, bindings
+                        )
+                        self.assertEqual(changed[field], nodes)
+
+    def test_a_bound_sampler_param_moves_only_that_node(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        changed = cardgen.apply_sampler_params(
+            workflow, {"steps": 40}, profile["bindings"]
+        )
+        self.assertEqual(changed["steps"], ["62"])
+        self.assertEqual(workflow["62"]["inputs"]["steps"], 40)
+        # The sampler itself only holds links, which is why the blanket path had
+        # nowhere to write and refused the option before the binding existed.
+        self.assertEqual(workflow["64"]["class_type"], "SamplerCustomAdvanced")
+        self.assertNotIn("steps", workflow["64"]["inputs"])
+
+    def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        changed = cardgen.apply_sampler_params(
+            workflow, {"steps": 40}, profile["bindings"]
+        )
+        self.assertEqual(changed["steps"], ["10", "12"])
+        for node_id in ("10", "12"):
+            self.assertEqual(workflow[node_id]["inputs"]["steps"], 40)
 
     def _generate_args(self, **overrides: object) -> argparse.Namespace:
         base = dict(

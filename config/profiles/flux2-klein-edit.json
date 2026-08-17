@@ -11,7 +11,10 @@
     "positive_prompt": {"node_id": "74", "field": "text"},
     "negative_prompt": {"node_id": "67", "field": "text"},
     "seed": {"node_id": "73", "field": "noise_seed"},
-    "input_image": {"node_id": "82", "field": "image"}
+    "input_image": {"node_id": "82", "field": "image"},
+    "steps": {"node_id": "62", "field": "steps"},
+    "cfg": {"node_id": "63", "field": "cfg"},
+    "sampler_name": {"node_id": "61", "field": "sampler_name"}
   },
   "approved_models": {
     "checkpoints": [],

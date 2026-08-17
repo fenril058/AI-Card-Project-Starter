@@ -30,7 +30,7 @@
 
 | オプション | 書き込む先 |
 |---|---|
-| `--steps` / `--cfg` / `--sampler` / `--scheduler` | そのフィールドを持つsamplerノードすべて。2パス構成では両方のパスが同じ値になる |
+| `--steps` / `--cfg` / `--sampler` / `--scheduler` | そのフィールドを持つsamplerノードすべて。2パス構成では両方のパスが同じ値になる。プロファイルがその項目の binding を持つ場合は、指名された1ノードだけ |
 | `--denoise` | プロファイルが `bindings.denoise` で指名した1ノードだけ |
 | `--width` / `--height` | 空Latentノードすべて（2つを同時に指定する） |
 | `--checkpoint` | `CheckpointLoader` すべて（そのプロファイルの承認済みファイルに限る） |
@@ -42,9 +42,12 @@
 `--denoise` を受け付けるのは `wai-hires`、`wai-hires-latent`、`wai-refine` の3つで、いずれも指しているのは2パス目です。
 1パス目は 1.0 のままでなければ空のlatentに対する img2img になってしまうため、両方のパスへ同じ値を書く作りにはなっていません。
 
+`flux2-klein-edit` は steps、cfg、sampler をそれぞれ別のノード（`Flux2Scheduler`、`CFGGuider`、`KSamplerSelect`）に持ち、samplerノード自身は接続だけを持ちます。
+そのためプロファイルが3つを個別に binding していて、`--steps` などはその1ノードへ落ちます。
+scheduler 名を持つノードが無いので、`--scheduler` だけはエラーになります。
+
 `wai-refine` と `esrgan-upscale` は空Latentを持たないので、`--width` と `--height` はエラーになります。
 `flux2-klein-edit` は空Latentを持つため通りますが、`Flux2Scheduler` が別に持つ width と height は変わらないので、大きく変えると食い違います。
-その `flux2-klein-edit` は steps と cfg も samplerノードの外に持つため、`--steps` と `--cfg` はエラーになります。
 
 `--count` は最大8です。
 `--seed` と併せると2枚目以降は 1 ずつ増えます。
@@ -201,7 +204,8 @@ strength 0.55 は 0.55、0.75、0.95 を同一seedで比べた結果で、強く
 `setting_overrides` のほうは、どのフィールドがどのノードで上書きされたかを記録します。値そのものが入るのは width、height、denoise だけです。
 
 `flux2-klein-edit` だけは `samplers` に steps と cfg が出ません。
-samplerノードが設定を自前で持たないためで、値は `node_inputs` の `Flux2Scheduler` と `CFGGuider` にあります。
+samplerノードが設定を自前で持たないためで、`--steps` で上書きした場合も含め、値は `node_inputs` の `Flux2Scheduler` と `CFGGuider` にあります。
+どのノードへ落ちたかは `setting_overrides.sampler_nodes` で確かめられます。
 `esrgan-upscale` は samplerも空Latentも持たないので、`samplers` と `latents` が空になり、`results[].seed` は `null` になります。
 
 失敗した実行にも同じファイルが残ります。
