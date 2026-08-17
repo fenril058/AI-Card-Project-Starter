@@ -204,11 +204,11 @@ class CardGenTests(unittest.TestCase):
             "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
             "wai-refine": ("12", None, every_sampler_field(["12"])),
             # FLUX.2 keeps each setting in its own node, so the profile binds
-            # them one by one. Nothing carries a scheduler name. --width moves
-            # the latent but not the width/height Flux2Scheduler holds itself.
+            # them one by one. Nothing carries a scheduler name. The resolution
+            # is stated twice and both statements have to move together.
             "flux2-klein-edit": (
                 None,
-                ["66"],
+                ["62", "66"],
                 {
                     "steps": ["62"],
                     "cfg": ["63"],
@@ -251,10 +251,13 @@ class CardGenTests(unittest.TestCase):
                 workflow = cardgen.load_json(profile["workflow_path"])
                 if latents is None:
                     with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_latent_size(workflow, 832, 1216)
+                        cardgen.apply_latent_size(workflow, 832, 1216, bindings)
                 else:
-                    changed = cardgen.apply_latent_size(workflow, 832, 1216)
+                    changed = cardgen.apply_latent_size(workflow, 832, 1216, bindings)
                     self.assertEqual(changed, latents)
+                    for node_id in changed:
+                        inputs = workflow[node_id]["inputs"]
+                        self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
 
             self.assertEqual(sorted(sampler_fields), sorted(SAMPLER_FIELDS))
             for field, nodes in sampler_fields.items():
@@ -283,6 +286,34 @@ class CardGenTests(unittest.TestCase):
         # nowhere to write and refused the option before the binding existed.
         self.assertEqual(workflow["64"]["class_type"], "SamplerCustomAdvanced")
         self.assertNotIn("steps", workflow["64"]["inputs"])
+
+    def test_flux2_resolution_moves_in_both_places_at_once(self) -> None:
+        """A run at 832x1216 measurably differs from one that left the scheduler
+        at 1024x1344, while two identical runs are pixel-identical. So the two
+        statements of the size have to move together or the graph means two
+        things at once."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["62"]["class_type"], "Flux2Scheduler")
+        self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
+
+        changed = cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        self.assertEqual(changed, ["62", "66"])
+        for node_id in ("62", "66"):
+            inputs = workflow[node_id]["inputs"]
+            self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
+
+    def test_a_stale_resolution_node_is_refused(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        for broken in (["62", "999"], ["62", "64"], "62", []):
+            with self.subTest(resolution_nodes=broken):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_latent_size(
+                        workflow, 832, 1216, {"resolution_nodes": broken}
+                    )
 
     def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")

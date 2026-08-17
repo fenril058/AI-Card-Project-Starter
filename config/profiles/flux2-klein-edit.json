@@ -14,7 +14,8 @@
     "input_image": {"node_id": "82", "field": "image"},
     "steps": {"node_id": "62", "field": "steps"},
     "cfg": {"node_id": "63", "field": "cfg"},
-    "sampler_name": {"node_id": "61", "field": "sampler_name"}
+    "sampler_name": {"node_id": "61", "field": "sampler_name"},
+    "resolution_nodes": ["62", "66"]
   },
   "approved_models": {
     "checkpoints": [],

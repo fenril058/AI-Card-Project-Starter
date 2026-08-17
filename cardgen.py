@@ -831,13 +831,68 @@ def apply_checkpoint_override(
     return sorted(changed)
 
 
+def resolve_resolution_nodes(
+    workflow: dict[str, Any], bindings: dict[str, Any] | None
+) -> list[str] | None:
+    """Check every node a profile lists as carrying the output resolution.
+
+    Returns None when the profile lists none, which leaves the empty-latent scan
+    in charge. Resolving without writing lets validate catch a stale node_id.
+    """
+    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
+    if binding is None:
+        return None
+    if (
+        not isinstance(binding, list)
+        or not binding
+        or not all(isinstance(node_id, str) and node_id for node_id in binding)
+    ):
+        raise CardGenError(
+            "bindings.resolution_nodesは空でない文字列の配列で指定してください。"
+        )
+
+    for node_id in binding:
+        node = workflow.get(node_id)
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            raise CardGenError(
+                f"bindings.resolution_nodesのノードがありません: node {node_id}"
+            )
+        missing = [field for field in ("width", "height") if field not in inputs]
+        if missing:
+            raise CardGenError(
+                "bindings.resolution_nodesの"
+                f"{'と'.join(missing)}入力がありません: node {node_id}"
+            )
+    return sorted(binding)
+
+
 def apply_latent_size(
-    workflow: dict[str, Any], width: int, height: int
+    workflow: dict[str, Any],
+    width: int,
+    height: int,
+    bindings: dict[str, Any] | None = None,
 ) -> list[str]:
+    """Write the output resolution everywhere the graph states it.
+
+    Scanning for empty-latent nodes is enough when the latent is the only place
+    the size appears. FLUX.2 states it twice: EmptyFlux2LatentImage sizes the
+    latent and Flux2Scheduler takes width and height of its own, so writing only
+    the latent leaves the two disagreeing. Which nodes carry the resolution is
+    not derivable from the graph shape, so a profile may list them instead.
+    """
     if width < 64 or height < 64:
         raise CardGenError("--widthと--heightは64以上で指定してください。")
     if width % 8 or height % 8:
         raise CardGenError("--widthと--heightは8の倍数で指定してください。")
+
+    listed = resolve_resolution_nodes(workflow, bindings)
+    if listed is not None:
+        for node_id in listed:
+            inputs = workflow[node_id]["inputs"]
+            inputs["width"] = width
+            inputs["height"] = height
+        return listed
 
     changed: list[str] = []
     for node_id, node in workflow.items():
@@ -1080,8 +1135,12 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
     input_image_node: str | None = None
     denoise_node: str | None = None
     sampler_param_nodes: dict[str, str] = {}
+    resolution_nodes: list[str] = []
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
+        # Resolve only, so a stale node_id fails here and not on the --width of
+        # a run that has already uploaded an image and queued work.
+        resolution_nodes = resolve_resolution_nodes(probe, bindings) or []
         for field in SAMPLER_OVERRIDE_FIELDS:
             if field not in bindings:
                 continue
@@ -1119,6 +1178,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "input_image_node": input_image_node,
         "denoise_node": denoise_node,
         "sampler_param_nodes": sampler_param_nodes,
+        "resolution_nodes": resolution_nodes,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
         "zeroed_negative_nodes": zeroed_negative_nodes,
@@ -1327,7 +1387,12 @@ def command_generate(
     if args.width is not None or args.height is not None:
         if args.width is None or args.height is None:
             raise CardGenError("--widthと--heightは同時に指定してください。")
-        latent_nodes = apply_latent_size(workflow, args.width, args.height)
+        latent_nodes = apply_latent_size(
+            workflow,
+            args.width,
+            args.height,
+            bindings if isinstance(bindings, dict) else None,
+        )
 
     sampler_overrides = apply_sampler_params(
         workflow,
