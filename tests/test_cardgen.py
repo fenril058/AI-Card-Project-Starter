@@ -272,6 +272,16 @@ class CardGenTests(unittest.TestCase):
                             workflow, params, bindings
                         )
                         self.assertEqual(changed[field], nodes)
+                        # The returned node id says where the write was aimed,
+                        # not that it happened. Read it back.
+                        binding = bindings.get(field)
+                        written = (
+                            binding["field"] if isinstance(binding, dict) else field
+                        )
+                        for node_id in nodes:
+                            self.assertEqual(
+                                workflow[node_id]["inputs"][written], sample[field]
+                            )
 
     def test_a_bound_sampler_param_moves_only_that_node(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
@@ -314,6 +324,90 @@ class CardGenTests(unittest.TestCase):
                     cardgen.apply_latent_size(
                         workflow, 832, 1216, {"resolution_nodes": broken}
                     )
+
+    def test_a_stale_sampler_binding_fails_validation(self) -> None:
+        """validate is the gate that keeps a stale node_id out of a run.
+
+        The bindings are only resolved when an override is passed, so nothing
+        else would notice a renumbered graph until --steps had already uploaded
+        an image and queued work.
+        """
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        summary = cardgen.validate_profile_workflow(
+            cardgen.load_profile(app, "flux2-klein-edit")
+        )
+        self.assertEqual(
+            summary["sampler_nodes"],
+            {"steps": ["62"], "cfg": ["63"], "sampler_name": ["61"]},
+        )
+
+        broken_cases = [
+            {"node_id": "999", "field": "steps"},
+            {"node_id": "62", "field": "renamed"},
+            # 63 is CFGGuider: positive is a link sitting next to cfg.
+            {"node_id": "63", "field": "positive"},
+            "62",
+            ["62"],
+        ]
+        for broken in broken_cases:
+            with self.subTest(steps=broken):
+                profile = cardgen.load_profile(app, "flux2-klein-edit")
+                profile["bindings"] = dict(profile["bindings"])
+                profile["bindings"]["steps"] = broken
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.validate_profile_workflow(profile)
+
+    def test_a_null_binding_means_the_same_thing_to_validate_and_generate(
+        self,
+    ) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        profile["bindings"] = dict(profile["bindings"])
+        profile["bindings"]["steps"] = None
+
+        summary = cardgen.validate_profile_workflow(profile)
+        self.assertNotIn("steps", summary["sampler_nodes"])
+        # generate falls back to the blanket path, which has nowhere to land on
+        # this graph. Both sides read the absence; only the run refuses.
+        workflow = cardgen.load_json(profile["workflow_path"])
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(
+                workflow, {"steps": 40}, profile["bindings"]
+            )
+
+    def test_a_binding_that_names_a_link_is_refused(self) -> None:
+        """Settings and links share one inputs dict, so a slip is writable."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["63"]["inputs"]["positive"], ["77", 0])
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(
+                workflow,
+                {"cfg": 3.5},
+                {"cfg": {"node_id": "63", "field": "positive"}},
+            )
+        self.assertEqual(workflow["63"]["inputs"]["positive"], ["77", 0])
+
+    def test_a_malformed_binding_is_a_cardgen_error(self) -> None:
+        """main() prints CardGenError and lets anything else traceback."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        for broken in ("62", 62, ["62"]):
+            with self.subTest(steps=broken):
+                workflow = cardgen.load_json(profile["workflow_path"])
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_sampler_params(
+                        workflow, {"steps": 40}, {"steps": broken}
+                    )
+
+    def test_an_unknown_bindings_key_is_refused(self) -> None:
+        """A key nothing reads is a typo, and a silent no-op hides it."""
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.check_binding_keys({"step": {"node_id": "62", "field": "steps"}})
+        cardgen.check_binding_keys(
+            {field: {"node_id": "1", "field": field} for field in SAMPLER_FIELDS}
+        )
 
     def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")

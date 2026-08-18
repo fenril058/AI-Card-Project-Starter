@@ -45,6 +45,21 @@ LATENT_TYPES = {
 # Sampler inputs that --steps/--cfg/--sampler/--scheduler may overwrite.
 SAMPLER_OVERRIDE_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
 
+# bindingsで指名できるキー。読む側が知らないキーを黙って無視すると、綴りを1文字
+# 間違えたプロファイルがvalidateを通り、generateで「bindings.stepsを追加してくだ
+# さい」と言われる。追加したつもりの本人には何が違うのか見えない。
+BINDING_KEYS = frozenset(
+    {
+        "positive_prompt",
+        "negative_prompt",
+        "seed",
+        "input_image",
+        "denoise",
+        "resolution_nodes",
+        *SAMPLER_OVERRIDE_FIELDS,
+    }
+)
+
 # Sampler inputs recorded in run metadata so a result can be traced to settings.
 SAMPLER_RECORD_FIELDS = (
     "steps",
@@ -408,6 +423,16 @@ def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
     return result
 
 
+def check_binding_keys(bindings: dict[str, Any]) -> None:
+    """Refuse a bindings key nothing reads, so a typo is not a silent no-op."""
+    unknown = sorted(set(bindings) - BINDING_KEYS)
+    if unknown:
+        raise CardGenError(
+            f"bindingsに未知のキーがあります: {'、'.join(unknown)}。"
+            f"使えるのは{'、'.join(sorted(BINDING_KEYS))}です。"
+        )
+
+
 def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any]:
     profile_id = requested_id or str(app["default_profile"])
     path = profile_path(app, profile_id)
@@ -459,6 +484,8 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
     bindings = profile.get("bindings")
     if bindings is not None and not isinstance(bindings, dict):
         raise CardGenError("bindingsはオブジェクトで指定してください。")
+    if isinstance(bindings, dict):
+        check_binding_keys(bindings)
 
     return profile
 
@@ -664,7 +691,39 @@ def bound_node(
     inputs = node.get("inputs")
     if not isinstance(inputs, dict) or field not in inputs:
         raise CardGenError(f"bindings.{label}の入力がありません: node {node_id}")
+    if isinstance(inputs[field], (list, dict)):
+        # 他ノードからの接続。設定と接続は同じinputsに並んでいるので、隣を指した
+        # bindingは書き込めてしまう。上書きすると辺が消え、グラフの意味が変わる。
+        raise CardGenError(
+            f"bindings.{label}が指しているのは設定ではなく他ノードからの接続です: "
+            f"node {node_id} {field}"
+        )
     return node_id, node, field
+
+
+def resolve_bound_node(
+    workflow: dict[str, Any], bindings: dict[str, Any], label: str
+) -> tuple[str, dict[str, Any], str]:
+    """Guard and resolve one binding without writing it. validate's entry point."""
+    binding = bindings.get(label)
+    if not isinstance(binding, dict):
+        raise CardGenError(f"bindings.{label}が不正です。")
+    return bound_node(workflow, binding, label)
+
+
+def set_bound_value(
+    workflow: dict[str, Any], bindings: dict[str, Any], label: str, value: Any
+) -> tuple[str, str]:
+    """Resolve one binding and write value into the node it names.
+
+    Every caller used to repeat guard, resolve, write. The copies drifted: the
+    sampler overrides arrived without the isinstance guard the others carried,
+    so a binding written as a string surfaced as AttributeError instead of a
+    CardGenError main() knows how to print.
+    """
+    node_id, node, field = resolve_bound_node(workflow, bindings, label)
+    node["inputs"][field] = value
+    return node_id, field
 
 
 def set_bound_prompts(
@@ -698,14 +757,9 @@ def set_bound_seed(
     拡大だけの工程は決定的で、同じ入力からは常に同じ出力が出る。seed を書く先が
     無いのは設定の誤りではない。
     """
-    binding = bindings.get("seed")
-    if binding is None:
+    if bindings.get("seed") is None:
         return None, None
-    if not isinstance(binding, dict):
-        raise CardGenError("bindings.seedが不正です。")
-    node_id, node, field = bound_node(workflow, binding, "seed")
-    node["inputs"][field] = seed
-    return node_id, field
+    return set_bound_value(workflow, bindings, "seed", seed)
 
 
 def set_bound_denoise(
@@ -721,25 +775,21 @@ def set_bound_denoise(
     """
     if not 0.0 <= denoise <= 1.0:
         raise CardGenError("--denoiseは0.0以上1.0以下で指定してください。")
-    binding = bindings.get("denoise")
-    if not isinstance(binding, dict):
+    if not isinstance(bindings.get("denoise"), dict):
         raise CardGenError(
             "このプロファイルは--denoiseに対応していません。"
             "対応させるにはプロファイルへbindings.denoiseを追加してください。"
         )
-    node_id, node, field = bound_node(workflow, binding, "denoise")
-    node["inputs"][field] = denoise
+    node_id, _ = set_bound_value(workflow, bindings, "denoise", denoise)
     return node_id
 
 
 def set_bound_input_image(
     workflow: dict[str, Any], bindings: dict[str, Any], uploaded_name: str
 ) -> str:
-    binding = bindings.get("input_image")
-    if not isinstance(binding, dict):
+    if not isinstance(bindings.get("input_image"), dict):
         raise CardGenError("このプロファイルは入力画像に対応していません。")
-    node_id, node, field = bound_node(workflow, binding, "input_image")
-    node["inputs"][field] = uploaded_name
+    node_id, _ = set_bound_value(workflow, bindings, "input_image", uploaded_name)
     return node_id
 
 
@@ -911,6 +961,21 @@ def apply_latent_size(
     return sorted(changed)
 
 
+def literal_field_nodes(workflow: dict[str, Any], field: str) -> list[str]:
+    """Node ids stating field as a literal. Links are settings of another node."""
+    found: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or field not in inputs:
+            continue
+        if isinstance(inputs[field], (list, dict)):
+            continue
+        found.append(str(node_id))
+    return sorted(found)
+
+
 def sampler_param_option(field: str) -> str:
     return "--" + field.replace("sampler_name", "sampler").replace("_", "-")
 
@@ -937,10 +1002,8 @@ def apply_sampler_params(
         if value is None:
             continue
 
-        binding = bound.get(field)
-        if binding is not None:
-            node_id, node, bound_field = bound_node(workflow, binding, field)
-            node["inputs"][bound_field] = value
+        if bound.get(field) is not None:
+            node_id, _ = set_bound_value(workflow, bound, field, value)
             changed[field] = [node_id]
             continue
 
@@ -952,10 +1015,20 @@ def apply_sampler_params(
                 nodes.append(node_id)
 
         if not nodes:
+            # bindingを勧めてよいのは、そのフィールドを持つノードが実際にある
+            # ときだけ。FLUX.2のschedulerのように書く先が無い項目まで「1行足せ
+            # ば直る」と言うと、足した先でvalidateが落ちる。
+            candidates = literal_field_nodes(workflow, field)
+            hint = (
+                f"{field}を持つのはnode {'、'.join(candidates)}なので、"
+                f"プロファイルへbindings.{field}を追加すれば対応できます。"
+                if candidates
+                else f"{field}を持つノードがこのグラフに無いので、bindingでも"
+                "対応できません。"
+            )
             raise CardGenError(
                 f"{sampler_param_option(field)}を適用できるSampler入力が"
-                "このワークフローにありません。"
-                f"対応させるにはプロファイルへbindings.{field}を追加してください。"
+                f"このワークフローにありません。{hint}"
             )
         changed[field] = sorted(nodes)
     return changed
@@ -1134,7 +1207,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
 
     input_image_node: str | None = None
     denoise_node: str | None = None
-    sampler_param_nodes: dict[str, str] = {}
+    sampler_param_nodes: dict[str, list[str]] = {}
     resolution_nodes: list[str] = []
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
@@ -1142,16 +1215,19 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         # a run that has already uploaded an image and queued work.
         resolution_nodes = resolve_resolution_nodes(probe, bindings) or []
         for field in SAMPLER_OVERRIDE_FIELDS:
-            if field not in bindings:
+            # generate reads a null binding as "no binding" and falls back to
+            # the blanket path. validate has to read it the same way, or it
+            # refuses a profile the run would have accepted.
+            if bindings.get(field) is None:
                 continue
             # Resolve only. validate has no value to write, and the node need
             # not be a sampler: FLUX.2 keeps steps and cfg outside it.
-            node_id, _, _ = bound_node(probe, bindings[field], field)
-            sampler_param_nodes[field] = node_id
-        if "denoise" in bindings:
+            node_id, _, _ = resolve_bound_node(probe, bindings, field)
+            sampler_param_nodes[field] = [node_id]
+        if bindings.get("denoise") is not None:
             # Resolve only: bound_node raises on a stale node_id or field, and
             # validate has no denoise to write. The workflow's own value stands.
-            denoise_node, _, _ = bound_node(probe, bindings["denoise"], "denoise")
+            denoise_node, _, _ = resolve_bound_node(probe, bindings, "denoise")
         if "input_image" in bindings:
             # generate uploads first and binds the returned name, so the binding
             # itself is never resolved until a run is already underway. Resolve
@@ -1177,7 +1253,9 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "input_image_required": input_image_node is not None,
         "input_image_node": input_image_node,
         "denoise_node": denoise_node,
-        "sampler_param_nodes": sampler_param_nodes,
+        # Same name and same shape as setting_overrides.sampler_nodes in the
+        # run metadata, so the two records can be read side by side.
+        "sampler_nodes": sampler_param_nodes,
         "resolution_nodes": resolution_nodes,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
@@ -1404,11 +1482,15 @@ def command_generate(
         },
         bindings if isinstance(bindings, dict) else None,
     )
-    # A bound field lands on one node, so the warning belongs to the blanket path.
-    if len(sampler_overrides.get("steps", [])) > 1:
+    # 分割点が危ういかどうかを決めるのはSampler数で、書き込んだノード数ではない。
+    # bindingで1ノードだけ動かしたときこそ、もう片方のstart_at_step/end_at_stepが
+    # 古いstepsのまま取り残される。
+    if args.steps is not None and len(sampler_nodes(workflow, required=False)) > 1:
+        written = "、".join(sampler_overrides.get("steps", []))
         print(
-            "NOTE: このワークフローには複数のSamplerがあります。--stepsは全Samplerへ"
-            "適用されますが、start_at_step/end_at_stepの分割点は変更しません。"
+            "NOTE: このワークフローには複数のSamplerがあります。--stepsを書き込んだ"
+            f"のはnode {written}で、start_at_step/end_at_stepの分割点は"
+            "変更しません。"
         )
 
     defaults = profile.get("defaults", {})

@@ -211,8 +211,8 @@ strength 0.55 は 0.55、0.75、0.95 を同一seedで比べた結果で、強く
 `generation_settings` は上書きを適用したあとのグラフから作られるので、`samplers` に出るのは実際に流れた値です。
 `setting_overrides` のほうは、どのフィールドがどのノードで上書きされたかを記録します。値そのものが入るのは width、height、denoise だけです。
 
-`flux2-klein-edit` だけは `samplers` に steps と cfg が出ません。
-samplerノードが設定を自前で持たないためで、`--steps` で上書きした場合も含め、値は `node_inputs` の `Flux2Scheduler` と `CFGGuider` にあります。
+`flux2-klein-edit` だけは `samplers` に steps、cfg、sampler_name のどれも出ません。
+samplerノードが設定を自前で持たないためで、`--steps` や `--sampler` で上書きした場合も含め、値は `node_inputs` の `Flux2Scheduler`（steps）、`CFGGuider`（cfg）、`KSamplerSelect`（sampler_name）にあります。
 どのノードへ落ちたかは `setting_overrides.sampler_nodes` で確かめられます。
 `esrgan-upscale` は samplerも空Latentも持たないので、`samplers` と `latents` が空になり、`results[].seed` は `null` になります。
 
