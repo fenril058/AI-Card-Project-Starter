@@ -914,6 +914,18 @@ def resolve_resolution_nodes(
                 "bindings.resolution_nodesの"
                 f"{'と'.join(missing)}入力がありません: node {node_id}"
             )
+        # bound_nodeと同じ理由。この経路だけがbound_nodeを通らないので、接続を
+        # 指した列挙が素通りしていた。上書きすると辺が消え、グラフの意味が変わる。
+        linked = [
+            field
+            for field in ("width", "height")
+            if isinstance(inputs[field], (list, dict))
+        ]
+        if linked:
+            raise CardGenError(
+                "bindings.resolution_nodesが指しているのは設定ではなく"
+                f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
+            )
     return sorted(binding)
 
 

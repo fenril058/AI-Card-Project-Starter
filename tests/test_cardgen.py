@@ -325,6 +325,27 @@ class CardGenTests(unittest.TestCase):
                         workflow, 832, 1216, {"resolution_nodes": broken}
                     )
 
+    def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
+        """resolution_nodes is the one binding that never reaches bound_node.
+
+        A listed node whose width is wired from somewhere else is the same slip
+        bound_node refuses, and overwriting it would drop the edge.
+        """
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        workflow["901"] = {
+            "class_type": "Stand-in",
+            "inputs": {"width": ["66", 0], "height": 1216},
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(
+                workflow, 832, 1216, {"resolution_nodes": ["66", "901"]}
+            )
+        self.assertEqual(workflow["901"]["inputs"]["width"], ["66", 0])
+        # The good node in the same list must not have been written either.
+        self.assertEqual(workflow["66"]["inputs"]["width"], 1024)
+
     def test_a_stale_sampler_binding_fails_validation(self) -> None:
         """validate is the gate that keeps a stale node_id out of a run.
 
