@@ -490,6 +490,126 @@ class CardGenTests(unittest.TestCase):
             ["62", "62", "66"],
         )
 
+    def test_the_check_and_the_write_round_the_same_way(self) -> None:
+        """They used to disagree: resolve rounded, apply demanded exact float
+        integrality. A profile could pass validate and then be impossible to run
+        at its own workflow's base size, because 1360 * 1.4 is
+        1903.9999999999998 in binary floating point. One policy now: round, and
+        refuse only when the rounding covers a real fraction."""
+        workflow = {
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 1040, "height": 1360, "batch_size": 1},
+            },
+            "9": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 1456, "height": 1904, "crop": "disabled"},
+            },
+        }
+        bindings = {
+            "resolution_nodes": [
+                {"node_id": "5", "scale": 1},
+                {"node_id": "9", "scale": 1.4},
+            ]
+        }
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(copy.deepcopy(workflow), bindings),
+            ["5", "9"],
+        )
+        written = copy.deepcopy(workflow)
+        self.assertEqual(
+            cardgen.apply_latent_size(written, 1040, 1360, bindings), ["5", "9"]
+        )
+        self.assertEqual(written["9"]["inputs"]["height"], 1904)
+
+        # A genuine fraction is still refused by both.
+        fractional = {
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+            },
+            "9": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 614, "height": 614, "crop": "disabled"},
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(
+                fractional,
+                832,
+                832,
+                {
+                    "resolution_nodes": [
+                        {"node_id": "5", "scale": 1},
+                        {"node_id": "9", "scale": 0.6},
+                    ]
+                },
+            )
+
+    def test_a_scaled_down_node_still_respects_the_floor(self) -> None:
+        """--width is floored at 64, but a scale below 1 writes something
+        smaller than the tool's own minimum without tripping that check."""
+        workflow = {
+            "23": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 1024, "height": 1024, "crop": "disabled"},
+            },
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 512, "height": 512, "batch_size": 1},
+            },
+        }
+        bindings = {
+            "resolution_nodes": [
+                {"node_id": "23", "scale": 1},
+                {"node_id": "5", "scale": 0.5},
+            ]
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(copy.deepcopy(workflow), 64, 64, bindings)
+        # 128 * 0.5 = 64, exactly the floor, and on the grid.
+        written = copy.deepcopy(workflow)
+        cardgen.apply_latent_size(written, 128, 128, bindings)
+        self.assertEqual(written["5"]["inputs"]["width"], 64)
+
+    def test_an_unknown_key_in_a_resolution_entry_is_refused(self) -> None:
+        """A misspelt scale silently defaults to 1 and moves the node by the
+        wrong amount -- the same cost check_binding_keys was added to avoid."""
+        for entry in ({"node_id": "5", "factor": 1}, {"node_id": "5", "scale_by": 1.5}):
+            with self.subTest(entry=entry):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries({"resolution_nodes": [entry]})
+        # A list of known keys still parses. It needs a scale-1 entry, since
+        # that is what --width refers to.
+        self.assertEqual(
+            cardgen.resolution_entries(
+                {
+                    "resolution_nodes": [
+                        {"node_id": "5", "scale": 1},
+                        {"node_id": "9", "scale": 2},
+                    ]
+                }
+            ),
+            [{"node_id": "5", "scale": 1.0}, {"node_id": "9", "scale": 2.0}],
+        )
+
+    def test_a_boolean_is_not_a_resolution(self) -> None:
+        """isinstance(True, int) is True, so the integer check let a hand-edited
+        workflow through."""
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.resolve_resolution_nodes(
+                {
+                    "5": {
+                        "class_type": "EmptyLatentImage",
+                        "inputs": {"width": True, "height": True, "batch_size": 1},
+                    }
+                },
+                {"resolution_nodes": ["5"]},
+            )
+        self.assertFalse(cardgen.positive_int(True))
+        self.assertFalse(cardgen.positive_int(0))
+        self.assertTrue(cardgen.positive_int(64))
+
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.
 

@@ -932,6 +932,31 @@ def apply_checkpoint_override(
     return sorted(changed)
 
 
+def positive_int(value: Any) -> bool:
+    """int, and not a bool. isinstance(True, int) is True in Python."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def scaled_size(value: int, scale: float, label: str) -> int:
+    """Apply a scale under one rounding policy.
+
+    resolve and apply used to disagree: the check rounded, the write demanded
+    exact float integrality, so a profile could pass validate and be impossible
+    to run at its own workflow's base size. Float products are not exact either
+    (1360 * 1.4 == 1903.9999999999998), so a bare == test rejects products that
+    are integers in arithmetic. Round, then require the rounding to be a
+    correction of float error rather than a real fraction.
+    """
+    exact = value * scale
+    result = round(exact)
+    if abs(exact - result) > 1e-6:
+        raise CardGenError(
+            f"scale {scale:g} を掛けると整数になりません: {label} "
+            f"({value} -> {exact:g})"
+        )
+    return result
+
+
 def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] | None:
     """Normalise bindings.resolution_nodes into {node_id, scale} entries.
 
@@ -956,6 +981,15 @@ def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] 
             raise CardGenError(
                 "bindings.resolution_nodesの要素はnode_id文字列か"
                 "{node_id, scale}オブジェクトです。"
+            )
+        unknown = sorted(set(item) - {"node_id", "scale"})
+        if unknown:
+            # check_binding_keys refuses an unknown key one screen up; a typo
+            # here silently defaults scale to 1 and moves the node by the wrong
+            # amount, which is the same cost that check argues against.
+            raise CardGenError(
+                "bindings.resolution_nodesの要素に未知のキーがあります: "
+                f"{'、'.join(unknown)}。使えるのはnode_idとscaleです。"
             )
         node_id = item.get("node_id")
         scale = item.get("scale", 1.0)
@@ -1016,9 +1050,9 @@ def resolve_resolution_nodes(
                 "bindings.resolution_nodesが指しているのは設定ではなく"
                 f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
             )
-        if not all(isinstance(inputs[f], int) for f in ("width", "height")):
+        if not all(positive_int(inputs[f]) for f in ("width", "height")):
             raise CardGenError(
-                f"bindings.resolution_nodesのwidth/heightが整数ではありません: "
+                f"bindings.resolution_nodesのwidth/heightが正の整数ではありません: "
                 f"node {node_id}"
             )
         sizes[node_id] = (inputs["width"], inputs["height"])
@@ -1061,7 +1095,10 @@ def resolve_resolution_nodes(
     base_w, base_h = bases.pop()
     for entry in entries:
         node_id, scale = entry["node_id"], entry["scale"]
-        want = (round(base_w * scale), round(base_h * scale))
+        want = (
+            scaled_size(base_w, scale, f"node {node_id} width"),
+            scaled_size(base_h, scale, f"node {node_id} height"),
+        )
         if sizes[node_id] != want:
             raise CardGenError(
                 f"bindings.resolution_nodesのscaleがワークフローと一致しません: "
@@ -1098,13 +1135,15 @@ def apply_latent_size(
         for entry in entries:
             node_id, scale = entry["node_id"], entry["scale"]
             node = workflow[node_id]
-            scaled_w, scaled_h = width * scale, height * scale
-            if scaled_w != int(scaled_w) or scaled_h != int(scaled_h):
+            scaled_w = scaled_size(width, scale, f"node {node_id} width")
+            scaled_h = scaled_size(height, scale, f"node {node_id} height")
+            if scaled_w < 64 or scaled_h < 64:
+                # The floor is checked on --width above, but a scale below 1
+                # writes something smaller than the tool's own minimum.
                 raise CardGenError(
-                    f"scale {scale:g} を掛けると整数になりません: node {node_id} "
-                    f"({width}x{height} -> {scaled_w:g}x{scaled_h:g})"
+                    f"解像度が64未満になります: node {node_id} "
+                    f"({scaled_w}x{scaled_h})。scale {scale:g} が掛かります。"
                 )
-            scaled_w, scaled_h = int(scaled_w), int(scaled_h)
             if scaled_w % 8 or scaled_h % 8:
                 # ノード種別では分けられない。ピクセル空間の ImageScale でも、
                 # 出力が VAEEncode へ入るなら8の倍数が要る。wai-hires の node 23 が
