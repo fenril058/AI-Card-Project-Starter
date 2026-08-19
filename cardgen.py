@@ -45,6 +45,21 @@ LATENT_TYPES = {
 # Sampler inputs that --steps/--cfg/--sampler/--scheduler may overwrite.
 SAMPLER_OVERRIDE_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
 
+# bindingsで指名できるキー。読む側が知らないキーを黙って無視すると、綴りを1文字
+# 間違えたプロファイルがvalidateを通り、generateで「bindings.stepsを追加してくだ
+# さい」と言われる。追加したつもりの本人には何が違うのか見えない。
+BINDING_KEYS = frozenset(
+    {
+        "positive_prompt",
+        "negative_prompt",
+        "seed",
+        "input_image",
+        "denoise",
+        "resolution_nodes",
+        *SAMPLER_OVERRIDE_FIELDS,
+    }
+)
+
 # Sampler inputs recorded in run metadata so a result can be traced to settings.
 SAMPLER_RECORD_FIELDS = (
     "steps",
@@ -408,6 +423,38 @@ def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
     return result
 
 
+def check_binding_keys(bindings: dict[str, Any]) -> None:
+    """Refuse a bindings key nothing reads, so a typo is not a silent no-op."""
+    unknown = sorted(set(bindings) - BINDING_KEYS)
+    if unknown:
+        raise CardGenError(
+            f"bindingsに未知のキーがあります: {'、'.join(unknown)}。"
+            f"使えるのは{'、'.join(sorted(BINDING_KEYS))}です。"
+        )
+
+
+def check_sampler_binding_fields(bindings: dict[str, Any]) -> None:
+    """Refuse a sampler binding that names an input other than the option itself.
+
+    seed and input_image legitimately name a different input (noise_seed, image),
+    so the rule cannot be general. ComfyUI fixes the names of these four, and
+    every shipped profile already matches. Left unchecked, bindings.steps naming
+    "width" passes validate and then writes --steps over the width --width just
+    set on that same node, which is the mismatch resolution_nodes exists to stop.
+    """
+    for field in SAMPLER_OVERRIDE_FIELDS:
+        binding = bindings.get(field)
+        if not isinstance(binding, dict):
+            continue
+        named = binding.get("field")
+        if named != field:
+            raise CardGenError(
+                f"bindings.{field}が指す入力は{field}でなければなりません: "
+                f"field={named!r}。ComfyUIの入力名は固定で、別の入力を指すと"
+                f"--{field}が無関係な設定を書き換えます。"
+            )
+
+
 def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any]:
     profile_id = requested_id or str(app["default_profile"])
     path = profile_path(app, profile_id)
@@ -459,6 +506,9 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
     bindings = profile.get("bindings")
     if bindings is not None and not isinstance(bindings, dict):
         raise CardGenError("bindingsはオブジェクトで指定してください。")
+    if isinstance(bindings, dict):
+        check_binding_keys(bindings)
+        check_sampler_binding_fields(bindings)
 
     return profile
 
@@ -664,7 +714,39 @@ def bound_node(
     inputs = node.get("inputs")
     if not isinstance(inputs, dict) or field not in inputs:
         raise CardGenError(f"bindings.{label}の入力がありません: node {node_id}")
+    if isinstance(inputs[field], (list, dict)):
+        # 他ノードからの接続。設定と接続は同じinputsに並んでいるので、隣を指した
+        # bindingは書き込めてしまう。上書きすると辺が消え、グラフの意味が変わる。
+        raise CardGenError(
+            f"bindings.{label}が指しているのは設定ではなく他ノードからの接続です: "
+            f"node {node_id} {field}"
+        )
     return node_id, node, field
+
+
+def resolve_bound_node(
+    workflow: dict[str, Any], bindings: dict[str, Any], label: str
+) -> tuple[str, dict[str, Any], str]:
+    """Guard and resolve one binding without writing it. validate's entry point."""
+    binding = bindings.get(label)
+    if not isinstance(binding, dict):
+        raise CardGenError(f"bindings.{label}が不正です。")
+    return bound_node(workflow, binding, label)
+
+
+def set_bound_value(
+    workflow: dict[str, Any], bindings: dict[str, Any], label: str, value: Any
+) -> tuple[str, str]:
+    """Resolve one binding and write value into the node it names.
+
+    Every caller used to repeat guard, resolve, write. The copies drifted: the
+    sampler overrides arrived without the isinstance guard the others carried,
+    so a binding written as a string surfaced as AttributeError instead of a
+    CardGenError main() knows how to print.
+    """
+    node_id, node, field = resolve_bound_node(workflow, bindings, label)
+    node["inputs"][field] = value
+    return node_id, field
 
 
 def set_bound_prompts(
@@ -698,14 +780,9 @@ def set_bound_seed(
     拡大だけの工程は決定的で、同じ入力からは常に同じ出力が出る。seed を書く先が
     無いのは設定の誤りではない。
     """
-    binding = bindings.get("seed")
-    if binding is None:
+    if bindings.get("seed") is None:
         return None, None
-    if not isinstance(binding, dict):
-        raise CardGenError("bindings.seedが不正です。")
-    node_id, node, field = bound_node(workflow, binding, "seed")
-    node["inputs"][field] = seed
-    return node_id, field
+    return set_bound_value(workflow, bindings, "seed", seed)
 
 
 def set_bound_denoise(
@@ -721,25 +798,21 @@ def set_bound_denoise(
     """
     if not 0.0 <= denoise <= 1.0:
         raise CardGenError("--denoiseは0.0以上1.0以下で指定してください。")
-    binding = bindings.get("denoise")
-    if not isinstance(binding, dict):
+    if not isinstance(bindings.get("denoise"), dict):
         raise CardGenError(
             "このプロファイルは--denoiseに対応していません。"
             "対応させるにはプロファイルへbindings.denoiseを追加してください。"
         )
-    node_id, node, field = bound_node(workflow, binding, "denoise")
-    node["inputs"][field] = denoise
+    node_id, _ = set_bound_value(workflow, bindings, "denoise", denoise)
     return node_id
 
 
 def set_bound_input_image(
     workflow: dict[str, Any], bindings: dict[str, Any], uploaded_name: str
 ) -> str:
-    binding = bindings.get("input_image")
-    if not isinstance(binding, dict):
+    if not isinstance(bindings.get("input_image"), dict):
         raise CardGenError("このプロファイルは入力画像に対応していません。")
-    node_id, node, field = bound_node(workflow, binding, "input_image")
-    node["inputs"][field] = uploaded_name
+    node_id, _ = set_bound_value(workflow, bindings, "input_image", uploaded_name)
     return node_id
 
 
@@ -831,13 +904,101 @@ def apply_checkpoint_override(
     return sorted(changed)
 
 
+def resolve_resolution_nodes(
+    workflow: dict[str, Any], bindings: dict[str, Any] | None
+) -> list[str] | None:
+    """Check every node a profile lists as carrying the output resolution.
+
+    Returns None when the profile lists none, which leaves the empty-latent scan
+    in charge. Resolving without writing lets validate catch a stale node_id.
+    """
+    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
+    if binding is None:
+        return None
+    if (
+        not isinstance(binding, list)
+        or not binding
+        or not all(isinstance(node_id, str) and node_id for node_id in binding)
+    ):
+        raise CardGenError(
+            "bindings.resolution_nodesは空でない文字列の配列で指定してください。"
+        )
+
+    for node_id in binding:
+        node = workflow.get(node_id)
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            raise CardGenError(
+                f"bindings.resolution_nodesのノードがありません: node {node_id}"
+            )
+        missing = [field for field in ("width", "height") if field not in inputs]
+        if missing:
+            raise CardGenError(
+                "bindings.resolution_nodesの"
+                f"{'と'.join(missing)}入力がありません: node {node_id}"
+            )
+        # bound_nodeと同じ理由。この経路だけがbound_nodeを通らないので、接続を
+        # 指した列挙が素通りしていた。上書きすると辺が消え、グラフの意味が変わる。
+        linked = [
+            field
+            for field in ("width", "height")
+            if isinstance(inputs[field], (list, dict))
+        ]
+        if linked:
+            raise CardGenError(
+                "bindings.resolution_nodesが指しているのは設定ではなく"
+                f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
+            )
+
+    # 列挙を書くと空Latent走査は行われない。取りこぼすと、出力サイズは既定のまま
+    # 列挙した側だけが動く。この列挙が防ぐはずの食い違いが、逆向きに、しかも
+    # エラーを出さずに起きる。
+    uncovered = sorted(
+        node_id
+        for node_id, node in workflow.items()
+        if isinstance(node, dict)
+        and node.get("class_type") in LATENT_TYPES
+        and isinstance(node.get("inputs"), dict)
+        and "width" in node["inputs"]
+        and "height" in node["inputs"]
+        and str(node_id) not in binding
+    )
+    if uncovered:
+        raise CardGenError(
+            "bindings.resolution_nodesが空Latentノードを列挙していません: "
+            f"node {'、'.join(uncovered)}。"
+            "列挙を書くと空Latentの走査は行われないので、解像度を述べている"
+            "ノードをすべて挙げてください。"
+        )
+    return sorted(binding)
+
+
 def apply_latent_size(
-    workflow: dict[str, Any], width: int, height: int
+    workflow: dict[str, Any],
+    width: int,
+    height: int,
+    bindings: dict[str, Any] | None = None,
 ) -> list[str]:
+    """Write the output resolution everywhere the graph states it.
+
+    Scanning for empty-latent nodes is enough when the latent is the only place
+    the size appears. FLUX.2 states it twice: EmptyFlux2LatentImage sizes the
+    latent and Flux2Scheduler takes width and height of its own, so writing only
+    the latent leaves the two disagreeing. Which nodes carry the resolution is
+    not derivable from the graph shape, so a profile may list them instead.
+    """
     if width < 64 or height < 64:
         raise CardGenError("--widthと--heightは64以上で指定してください。")
     if width % 8 or height % 8:
         raise CardGenError("--widthと--heightは8の倍数で指定してください。")
+
+    listed = resolve_resolution_nodes(workflow, bindings)
+    if listed is not None:
+        for node_id in listed:
+            inputs = workflow[node_id]["inputs"]
+            inputs["width"] = width
+            inputs["height"] = height
+        return listed
 
     changed: list[str] = []
     for node_id, node in workflow.items():
@@ -856,14 +1017,50 @@ def apply_latent_size(
     return sorted(changed)
 
 
+def literal_field_nodes(workflow: dict[str, Any], field: str) -> list[str]:
+    """Node ids stating field as a literal. Links are settings of another node."""
+    found: list[str] = []
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict) or field not in inputs:
+            continue
+        if isinstance(inputs[field], (list, dict)):
+            continue
+        found.append(str(node_id))
+    return sorted(found)
+
+
+def sampler_param_option(field: str) -> str:
+    return "--" + field.replace("sampler_name", "sampler").replace("_", "-")
+
+
 def apply_sampler_params(
-    workflow: dict[str, Any], params: dict[str, Any]
+    workflow: dict[str, Any],
+    params: dict[str, Any],
+    bindings: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
-    """Overwrite sampler inputs on every sampler node that exposes them."""
+    """Overwrite sampler inputs, preferring the node a profile names.
+
+    Writing every sampler that exposes the field is right for a graph whose
+    samplers carry their own settings: a hires pair wants both passes moved
+    together. It has nowhere to land when the setting lives outside the sampler.
+    FLUX.2 keeps steps in Flux2Scheduler, cfg in CFGGuider and sampler_name in
+    KSamplerSelect, leaving SamplerCustomAdvanced with links alone, so --steps
+    used to fail on a graph that plainly has steps. A profile may therefore name
+    one node per field, the way bindings.denoise already does.
+    """
+    bound = bindings if isinstance(bindings, dict) else {}
     changed: dict[str, list[str]] = {}
     for field in SAMPLER_OVERRIDE_FIELDS:
         value = params.get(field)
         if value is None:
+            continue
+
+        if bound.get(field) is not None:
+            node_id, _ = set_bound_value(workflow, bound, field, value)
+            changed[field] = [node_id]
             continue
 
         nodes: list[str] = []
@@ -874,9 +1071,20 @@ def apply_sampler_params(
                 nodes.append(node_id)
 
         if not nodes:
-            option = "--" + field.replace("sampler_name", "sampler").replace("_", "-")
+            # bindingを勧めてよいのは、そのフィールドを持つノードが実際にある
+            # ときだけ。FLUX.2のschedulerのように書く先が無い項目まで「1行足せ
+            # ば直る」と言うと、足した先でvalidateが落ちる。
+            candidates = literal_field_nodes(workflow, field)
+            hint = (
+                f"{field}を持つのはnode {'、'.join(candidates)}なので、"
+                f"プロファイルへbindings.{field}を追加すれば対応できます。"
+                if candidates
+                else f"{field}を持つノードがこのグラフに無いので、bindingでも"
+                "対応できません。"
+            )
             raise CardGenError(
-                f"{option}を適用できるSampler入力がこのワークフローにありません。"
+                f"{sampler_param_option(field)}を適用できるSampler入力が"
+                f"このワークフローにありません。{hint}"
             )
         changed[field] = sorted(nodes)
     return changed
@@ -1055,12 +1263,27 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
 
     input_image_node: str | None = None
     denoise_node: str | None = None
+    sampler_param_nodes: dict[str, list[str]] = {}
+    resolution_nodes: list[str] = []
     if isinstance(bindings, dict):
         primary_id, seed_field = set_bound_seed(probe, bindings, 1)
-        if "denoise" in bindings:
+        # Resolve only, so a stale node_id fails here and not on the --width of
+        # a run that has already uploaded an image and queued work.
+        resolution_nodes = resolve_resolution_nodes(probe, bindings) or []
+        for field in SAMPLER_OVERRIDE_FIELDS:
+            # generate reads a null binding as "no binding" and falls back to
+            # the blanket path. validate has to read it the same way, or it
+            # refuses a profile the run would have accepted.
+            if bindings.get(field) is None:
+                continue
+            # Resolve only. validate has no value to write, and the node need
+            # not be a sampler: FLUX.2 keeps steps and cfg outside it.
+            node_id, _, _ = resolve_bound_node(probe, bindings, field)
+            sampler_param_nodes[field] = [node_id]
+        if bindings.get("denoise") is not None:
             # Resolve only: bound_node raises on a stale node_id or field, and
             # validate has no denoise to write. The workflow's own value stands.
-            denoise_node, _, _ = bound_node(probe, bindings["denoise"], "denoise")
+            denoise_node, _, _ = resolve_bound_node(probe, bindings, "denoise")
         if "input_image" in bindings:
             # generate uploads first and binds the returned name, so the binding
             # itself is never resolved until a run is already underway. Resolve
@@ -1086,6 +1309,10 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "input_image_required": input_image_node is not None,
         "input_image_node": input_image_node,
         "denoise_node": denoise_node,
+        # Same name and same shape as setting_overrides.sampler_nodes in the
+        # run metadata, so the two records can be read side by side.
+        "sampler_nodes": sampler_param_nodes,
+        "resolution_nodes": resolution_nodes,
         "positive_prompt_nodes": positive_nodes,
         "negative_conditioning_nodes": negative_nodes,
         "zeroed_negative_nodes": zeroed_negative_nodes,
@@ -1290,11 +1517,16 @@ def command_generate(
 
     model_uses = verify_approved_models(workflow, approved)
 
-    latent_nodes: list[str] = []
+    resolution_nodes: list[str] = []
     if args.width is not None or args.height is not None:
         if args.width is None or args.height is None:
             raise CardGenError("--widthと--heightは同時に指定してください。")
-        latent_nodes = apply_latent_size(workflow, args.width, args.height)
+        resolution_nodes = apply_latent_size(
+            workflow,
+            args.width,
+            args.height,
+            bindings if isinstance(bindings, dict) else None,
+        )
 
     sampler_overrides = apply_sampler_params(
         workflow,
@@ -1304,11 +1536,17 @@ def command_generate(
             "sampler_name": args.sampler_name,
             "scheduler": args.scheduler,
         },
+        bindings if isinstance(bindings, dict) else None,
     )
-    if args.steps is not None and len(sampler_nodes(workflow)) > 1:
+    # 分割点が危ういかどうかを決めるのはSampler数で、書き込んだノード数ではない。
+    # bindingで1ノードだけ動かしたときこそ、もう片方のstart_at_step/end_at_stepが
+    # 古いstepsのまま取り残される。
+    if args.steps is not None and len(sampler_nodes(workflow, required=False)) > 1:
+        written = "、".join(sampler_overrides.get("steps", []))
         print(
-            "NOTE: このワークフローには複数のSamplerがあります。--stepsは全Samplerへ"
-            "適用されますが、start_at_step/end_at_stepの分割点は変更しません。"
+            "NOTE: このワークフローには複数のSamplerがあります。--stepsを書き込んだ"
+            f"のはnode {written}で、start_at_step/end_at_stepの分割点は"
+            "変更しません。"
         )
 
     defaults = profile.get("defaults", {})
@@ -1443,7 +1681,7 @@ def command_generate(
         }
 
     metadata = {
-        "schema_version": 6,
+        "schema_version": 7,
         "status": "error" if failure is not None else "ok",
         "failure": failure,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -1463,7 +1701,10 @@ def command_generate(
         "setting_overrides": {
             "width": args.width,
             "height": args.height,
-            "latent_nodes": latent_nodes,
+            # Not "latent_nodes": a profile may list a node that states the
+            # resolution without being a latent. flux2-klein-edit records
+            # Flux2Scheduler here. Same name and shape as validate's key.
+            "resolution_nodes": resolution_nodes,
             "sampler_nodes": sampler_overrides,
             "denoise": args.denoise,
             "denoise_node": denoise_node,

@@ -17,6 +17,13 @@ assert SPEC and SPEC.loader
 cardgen = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(cardgen)
 
+SAMPLER_FIELDS = ("steps", "cfg", "sampler_name", "scheduler")
+
+
+def every_sampler_field(nodes: list[str] | None) -> dict[str, list[str] | None]:
+    """One expectation shared by all four sampler options."""
+    return {field: nodes for field in SAMPLER_FIELDS}
+
 
 class CardGenTests(unittest.TestCase):
     def test_public_repository_tracks_no_input_or_image_assets(self) -> None:
@@ -171,27 +178,46 @@ class CardGenTests(unittest.TestCase):
                 )
 
     def test_documented_override_matrix_holds(self) -> None:
-        """Pin which profiles accept --denoise, --width/--height and --steps.
+        """Pin where each override lands, per profile.
 
         docs/profiles-explained.md prints this matrix and tells readers that an
         option with nowhere to land is an error rather than a silent no-op.
-        Widening any cell (teaching --steps to reach Flux2Scheduler, say) must
-        fail here so the document is corrected in the same change.
+        Moving any cell must fail here so the document is corrected in the same
+        change. The sampler fields are resolved with the profile's bindings, the
+        way command_generate does; without them this only exercises the blanket
+        path and says nothing about what --steps actually does.
         """
-        # profile -> (denoise node, latent nodes, steps nodes). None means the
-        # option is refused for that profile.
-        expected: dict[str, tuple[str | None, list[str] | None, list[str] | None]] = {
-            "wai-hires": ("12", ["5"], ["10", "12"]),
-            "wai-hires-latent": ("12", ["5"], ["10", "12"]),
-            "wai-single": (None, ["5"], ["10"]),
-            "zimage": (None, ["57:13"], ["57:3"]),
-            "wai-refine": ("12", None, ["12"]),
-            # steps and cfg live outside the sampler node, so neither override
-            # has anywhere to land. --width moves the latent but not the
-            # width/height Flux2Scheduler carries of its own.
-            "flux2-klein-edit": (None, ["66"], None),
-            "esrgan-upscale": (None, None, None),
-            "wai-controlnet": (None, ["5"], ["10", "12"]),
+        sample = {
+            "steps": 40,
+            "cfg": 3.5,
+            "sampler_name": "dpmpp_2m",
+            "scheduler": "karras",
+        }
+        # profile -> (denoise node, latent nodes, sampler field -> nodes).
+        # None means the option is refused for that profile.
+        expected: dict[
+            str, tuple[str | None, list[str] | None, dict[str, list[str] | None]]
+        ] = {
+            "wai-hires": ("12", ["5"], every_sampler_field(["10", "12"])),
+            "wai-hires-latent": ("12", ["5"], every_sampler_field(["10", "12"])),
+            "wai-single": (None, ["5"], every_sampler_field(["10"])),
+            "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
+            "wai-refine": ("12", None, every_sampler_field(["12"])),
+            # FLUX.2 keeps each setting in its own node, so the profile binds
+            # them one by one. Nothing carries a scheduler name. The resolution
+            # is stated twice and both statements have to move together.
+            "flux2-klein-edit": (
+                None,
+                ["62", "66"],
+                {
+                    "steps": ["62"],
+                    "cfg": ["63"],
+                    "sampler_name": ["61"],
+                    "scheduler": None,
+                },
+            ),
+            "esrgan-upscale": (None, None, every_sampler_field(None)),
+            "wai-controlnet": (None, ["5"], every_sampler_field(["10", "12"])),
         }
 
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
@@ -201,8 +227,13 @@ class CardGenTests(unittest.TestCase):
             sorted(path.stem for path in profiles_dir.glob("*.json")),
             "a profile was added or removed; update the matrix and the document",
         )
+        self.assertEqual(
+            sorted(SAMPLER_FIELDS),
+            sorted(cardgen.SAMPLER_OVERRIDE_FIELDS),
+            "an override field was added; update the matrix and the document",
+        )
 
-        for profile_id, (denoise, latents, steps) in expected.items():
+        for profile_id, (denoise, latents, sampler_fields) in expected.items():
             profile = cardgen.load_profile(app, profile_id)
             raw_bindings = profile.get("bindings")
             bindings = raw_bindings if isinstance(raw_bindings, dict) else {}
@@ -220,19 +251,273 @@ class CardGenTests(unittest.TestCase):
                 workflow = cardgen.load_json(profile["workflow_path"])
                 if latents is None:
                     with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_latent_size(workflow, 832, 1216)
+                        cardgen.apply_latent_size(workflow, 832, 1216, bindings)
                 else:
-                    changed = cardgen.apply_latent_size(workflow, 832, 1216)
+                    changed = cardgen.apply_latent_size(workflow, 832, 1216, bindings)
                     self.assertEqual(changed, latents)
+                    for node_id in changed:
+                        inputs = workflow[node_id]["inputs"]
+                        self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
 
-            with self.subTest(profile=profile_id, option="--steps"):
+            self.assertEqual(sorted(sampler_fields), sorted(SAMPLER_FIELDS))
+            for field, nodes in sampler_fields.items():
+                with self.subTest(profile=profile_id, option=field):
+                    workflow = cardgen.load_json(profile["workflow_path"])
+                    params = {field: sample[field]}
+                    if nodes is None:
+                        with self.assertRaises(cardgen.CardGenError):
+                            cardgen.apply_sampler_params(workflow, params, bindings)
+                    else:
+                        changed = cardgen.apply_sampler_params(
+                            workflow, params, bindings
+                        )
+                        self.assertEqual(changed[field], nodes)
+                        # The returned node id says where the write was aimed,
+                        # not that it happened. Read it back.
+                        binding = bindings.get(field)
+                        written = (
+                            binding["field"] if isinstance(binding, dict) else field
+                        )
+                        for node_id in nodes:
+                            self.assertEqual(
+                                workflow[node_id]["inputs"][written], sample[field]
+                            )
+
+    def test_a_bound_sampler_param_moves_only_that_node(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        changed = cardgen.apply_sampler_params(
+            workflow, {"steps": 40}, profile["bindings"]
+        )
+        self.assertEqual(changed["steps"], ["62"])
+        self.assertEqual(workflow["62"]["inputs"]["steps"], 40)
+        # The sampler itself only holds links, which is why the blanket path had
+        # nowhere to write and refused the option before the binding existed.
+        self.assertEqual(workflow["64"]["class_type"], "SamplerCustomAdvanced")
+        self.assertNotIn("steps", workflow["64"]["inputs"])
+
+    def test_flux2_resolution_moves_in_both_places_at_once(self) -> None:
+        """A run at 832x1216 measurably differs from one that left the scheduler
+        at 1024x1344, while two identical runs are pixel-identical. So the two
+        statements of the size have to move together or the graph means two
+        things at once."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["62"]["class_type"], "Flux2Scheduler")
+        self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
+
+        changed = cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        self.assertEqual(changed, ["62", "66"])
+        for node_id in ("62", "66"):
+            inputs = workflow[node_id]["inputs"]
+            self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
+
+    def test_a_stale_resolution_node_is_refused(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        for broken in (["62", "999"], ["62", "64"], "62", []):
+            with self.subTest(resolution_nodes=broken):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_latent_size(
+                        workflow, 832, 1216, {"resolution_nodes": broken}
+                    )
+
+    def test_a_resolution_list_missing_the_latent_is_refused(self) -> None:
+        """Listing nodes turns the empty-latent scan off, so an incomplete list
+        would move the scheduler while the output size stayed put -- the very
+        mismatch the listing exists to prevent, inverted and silent."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
+
+        # 62 is Flux2Scheduler: real, resolution-bearing, and not the latent.
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(
+                workflow, 832, 1216, {"resolution_nodes": ["62"]}
+            )
+        self.assertEqual(workflow["62"]["inputs"]["width"], 1024)
+        self.assertEqual(workflow["66"]["inputs"]["width"], 1024)
+
+        # The profile's own list covers both, so it still resolves.
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(workflow, profile["bindings"]),
+            ["62", "66"],
+        )
+
+    def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
+        """resolution_nodes is the one binding that never reaches bound_node.
+
+        A listed node whose width is wired from somewhere else is the same slip
+        bound_node refuses, and overwriting it would drop the edge.
+        """
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        workflow["901"] = {
+            "class_type": "Stand-in",
+            "inputs": {"width": ["66", 0], "height": 1216},
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(
+                workflow, 832, 1216, {"resolution_nodes": ["66", "901"]}
+            )
+        self.assertEqual(workflow["901"]["inputs"]["width"], ["66", 0])
+        # The good node in the same list must not have been written either.
+        self.assertEqual(workflow["66"]["inputs"]["width"], 1024)
+
+    def test_a_stale_sampler_binding_fails_validation(self) -> None:
+        """validate is the gate that keeps a stale node_id out of a run.
+
+        The bindings are only resolved when an override is passed, so nothing
+        else would notice a renumbered graph until --steps had already uploaded
+        an image and queued work.
+        """
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        summary = cardgen.validate_profile_workflow(
+            cardgen.load_profile(app, "flux2-klein-edit")
+        )
+        self.assertEqual(
+            summary["sampler_nodes"],
+            {"steps": ["62"], "cfg": ["63"], "sampler_name": ["61"]},
+        )
+
+        broken_cases = [
+            {"node_id": "999", "field": "steps"},
+            {"node_id": "62", "field": "renamed"},
+            # 63 is CFGGuider: positive is a link sitting next to cfg.
+            {"node_id": "63", "field": "positive"},
+            "62",
+            ["62"],
+        ]
+        for broken in broken_cases:
+            with self.subTest(steps=broken):
+                profile = cardgen.load_profile(app, "flux2-klein-edit")
+                profile["bindings"] = dict(profile["bindings"])
+                profile["bindings"]["steps"] = broken
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.validate_profile_workflow(profile)
+
+    def test_a_null_binding_means_the_same_thing_to_validate_and_generate(
+        self,
+    ) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        profile["bindings"] = dict(profile["bindings"])
+        profile["bindings"]["steps"] = None
+
+        summary = cardgen.validate_profile_workflow(profile)
+        self.assertNotIn("steps", summary["sampler_nodes"])
+        # generate falls back to the blanket path, which has nowhere to land on
+        # this graph. Both sides read the absence; only the run refuses.
+        workflow = cardgen.load_json(profile["workflow_path"])
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(
+                workflow, {"steps": 40}, profile["bindings"]
+            )
+
+    def test_a_binding_that_names_a_link_is_refused(self) -> None:
+        """Settings and links share one inputs dict, so a slip is writable."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["63"]["inputs"]["positive"], ["77", 0])
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(
+                workflow,
+                {"cfg": 3.5},
+                {"cfg": {"node_id": "63", "field": "positive"}},
+            )
+        self.assertEqual(workflow["63"]["inputs"]["positive"], ["77", 0])
+
+    def test_a_malformed_binding_is_a_cardgen_error(self) -> None:
+        """main() prints CardGenError and lets anything else traceback."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        for broken in ("62", 62, ["62"]):
+            with self.subTest(steps=broken):
                 workflow = cardgen.load_json(profile["workflow_path"])
-                if steps is None:
-                    with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_sampler_params(workflow, {"steps": 40})
-                else:
-                    changed = cardgen.apply_sampler_params(workflow, {"steps": 40})
-                    self.assertEqual(changed["steps"], steps)
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_sampler_params(
+                        workflow, {"steps": 40}, {"steps": broken}
+                    )
+
+    def test_an_unknown_bindings_key_is_refused(self) -> None:
+        """A key nothing reads is a typo, and a silent no-op hides it."""
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.check_binding_keys({"step": {"node_id": "62", "field": "steps"}})
+        cardgen.check_binding_keys(
+            {field: {"node_id": "1", "field": field} for field in SAMPLER_FIELDS}
+        )
+
+    def test_a_sampler_binding_must_name_its_own_input(self) -> None:
+        """A sampler binding naming a neighbouring input is writable and wrong.
+
+        --steps then lands on that neighbour. On flux2-klein-edit, pointing
+        bindings.steps at "width" makes --steps overwrite the width --width just
+        set on node 62, leaving it disagreeing with the latent -- the mismatch
+        resolution_nodes exists to prevent, with no error raised.
+        """
+        for named in ("width", "height", "cfg", "denoise", None):
+            with self.subTest(field=named):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.check_sampler_binding_fields(
+                        {"steps": {"node_id": "62", "field": named}}
+                    )
+        # seed and input_image legitimately name a different input, so the rule
+        # is scoped to the four whose ComfyUI input names are fixed.
+        cardgen.check_sampler_binding_fields(
+            {"seed": {"node_id": "73", "field": "noise_seed"}}
+        )
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        for profile_id in ("flux2-klein-edit", "wai-hires"):
+            cardgen.load_profile(app, profile_id)
+
+    def test_the_run_record_does_not_call_them_latent_nodes(self) -> None:
+        """A listed resolution node need not be a latent -- flux2-klein-edit
+        records Flux2Scheduler among them -- so the key cannot claim otherwise.
+        Same name and shape as validate's resolution_nodes."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
+            out = Path(temp_dir)
+            app["output_dir_path"] = out
+            image = out / "fake.png"
+            image.write_bytes(b"not really a png")
+            with unittest.mock.patch.object(
+                cardgen, "queue_prompt", return_value="pid-1"
+            ), unittest.mock.patch.object(
+                cardgen, "wait_for_history", return_value={}
+            ), unittest.mock.patch.object(
+                cardgen, "download_outputs", return_value=[image]
+            ), unittest.mock.patch.object(
+                cardgen, "comfy_versions", return_value={}
+            ):
+                code = cardgen.command_generate(
+                    self._generate_args(width=832, height=1216), app, "wai-hires"
+                )
+            self.assertEqual(code, 0)
+            meta = json.loads(
+                next(out.glob("*_metadata.json")).read_text(encoding="utf-8")
+            )
+
+        overrides = meta["setting_overrides"]
+        self.assertNotIn("latent_nodes", overrides)
+        self.assertEqual(overrides["resolution_nodes"], ["5"])
+        self.assertEqual(meta["schema_version"], 7)
+
+    def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        changed = cardgen.apply_sampler_params(
+            workflow, {"steps": 40}, profile["bindings"]
+        )
+        self.assertEqual(changed["steps"], ["10", "12"])
+        for node_id in ("10", "12"):
+            self.assertEqual(workflow[node_id]["inputs"]["steps"], 40)
 
     def _generate_args(self, **overrides: object) -> argparse.Namespace:
         base = dict(
@@ -273,7 +558,7 @@ class CardGenTests(unittest.TestCase):
             self.assertEqual(len(written), 1)
             meta = json.loads(written[0].read_text(encoding="utf-8"))
 
-        self.assertEqual(meta["schema_version"], 6)
+        self.assertEqual(meta["schema_version"], 7)
         self.assertEqual(meta["status"], "error")
         self.assertEqual(meta["results"], [])
         self.assertEqual(meta["failure"]["error_type"], "CardGenError")

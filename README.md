@@ -237,11 +237,13 @@ uv run python cardgen.py --profile wai-single generate `
   --scheduler karras
 ```
 
-`--width` と `--height` は同時に、64以上かつ8の倍数で指定します。Sampler設定は該当入力を持つ全Samplerノードへ適用されます。
+`--width` と `--height` は同時に、64以上かつ8の倍数で指定します。Sampler設定は該当入力を持つ全Samplerノードへ適用されますが、プロファイルが同名の `bindings` を持つ項目は指名された1ノードだけに書き込まれます。
 
 `--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
 
-`--denoise` だけは他と扱いが違います。`--steps` や `--cfg` は該当入力を持つ全Samplerへ一括適用されますが、denoiseをそうすると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine` です。
+`--denoise` は常に1ノードにだけ適用されます。`--steps` や `--cfg` を該当入力を持つ全Samplerへ一括適用するのと同じことを denoise でやると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine` です。
+
+`--steps`、`--cfg`、`--sampler`、`--scheduler` も、プロファイルが同名の binding（`bindings.steps` など）を持つ場合はその1ノードだけに書き込みます。設定をsamplerノードの外に持つグラフのための逃げ道で、`flux2-klein-edit` が steps を `Flux2Scheduler`、cfg を `CFGGuider`、sampler_name を `KSamplerSelect` へ指名しています。どのオプションがどのプロファイルでどこへ落ちるかは [docs/profiles-explained.md](docs/profiles-explained.md#既定値と上書き) にあります。
 
 ## 承認済みCheckpointの切り替え
 
@@ -274,7 +276,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 ## 出力と再現メタデータ
 
-画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 6です。
+画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 7です。
 
 主な記録内容:
 

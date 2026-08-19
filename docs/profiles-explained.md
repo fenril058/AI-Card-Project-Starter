@@ -30,9 +30,9 @@
 
 | オプション | 書き込む先 |
 |---|---|
-| `--steps` / `--cfg` / `--sampler` / `--scheduler` | そのフィールドを持つsamplerノードすべて。2パス構成では両方のパスが同じ値になる |
+| `--steps` / `--cfg` / `--sampler` / `--scheduler` | そのフィールドを持つsamplerノードすべて。2パス構成では両方のパスが同じ値になる。プロファイルがその項目の binding を持つ場合は、指名された1ノードだけ |
 | `--denoise` | プロファイルが `bindings.denoise` で指名した1ノードだけ |
-| `--width` / `--height` | 空Latentノードすべて（2つを同時に指定する） |
+| `--width` / `--height` | 空Latentノードすべて（2つを同時に指定する）。プロファイルが解像度を持つノードを列挙している場合は、そのすべて |
 | `--checkpoint` | `CheckpointLoader` すべて（そのプロファイルの承認済みファイルに限る） |
 | `--seed` | プロファイルが `bindings.seed` で指名した1ノード |
 
@@ -42,9 +42,16 @@
 `--denoise` を受け付けるのは `wai-hires`、`wai-hires-latent`、`wai-refine` の3つで、いずれも指しているのは2パス目です。
 1パス目は 1.0 のままでなければ空のlatentに対する img2img になってしまうため、両方のパスへ同じ値を書く作りにはなっていません。
 
+`flux2-klein-edit` は steps、cfg、sampler をそれぞれ別のノード（`Flux2Scheduler`、`CFGGuider`、`KSamplerSelect`）に持ち、samplerノード自身は接続だけを持ちます。
+そのためプロファイルが3つを個別に binding していて、`--steps` などはその1ノードへ落ちます。
+scheduler 名を持つノードが無いので、`--scheduler` だけはエラーになります。
+
 `wai-refine` と `esrgan-upscale` は空Latentを持たないので、`--width` と `--height` はエラーになります。
-`flux2-klein-edit` は空Latentを持つため通りますが、`Flux2Scheduler` が別に持つ width と height は変わらないので、大きく変えると食い違います。
-その `flux2-klein-edit` は steps と cfg も samplerノードの外に持つため、`--steps` と `--cfg` はエラーになります。
+
+`flux2-klein-edit` は解像度を2箇所（`EmptyFlux2LatentImage` と `Flux2Scheduler`）に持つので、プロファイルが両方を列挙していて同時に動きます。
+片方だけ動かすと絵が変わります。同じ seed、同じプロンプト、同じ入力で 832×1216 を2本撮り、`Flux2Scheduler` を 1024×1344 のままにした側と揃えた側を比べたところ、画素の91%が違い、平均差は 4.9/255 でした（1組の比較）。
+構図と配色は変わらず、差は鎧の編み上げや雲の階調といった細部に出ます。
+同一設定で2回撮ると画素まで一致するので、この差は実行ごとのばらつきではありません。
 
 `--count` は最大8です。
 `--seed` と併せると2枚目以降は 1 ずつ増えます。
@@ -65,7 +72,11 @@ denoise は「どれくらい良くするか」ではなく、入力をどれだ
 
 seed は再現のために固定する条件の1つであって、それだけで同じ結果を保証するものではありません。
 PyTorch自身、演算の実装が環境によって変わるため、リリースやプラットフォームをまたぐ完全な再現性は保証しないと明記しています。
-ファイルとしてのバイト一致も前提にしないでください。
+
+同じ環境で試したかぎりでは、同じプロファイル、同じ設定、同じ seed で2回流すと画素まで一致しました（`flux2-klein-edit` で1組を確認）。
+**それでもファイルのバイト列は一致しません。**
+ComfyUI が出力ファイル名の接頭辞を画像へ埋め込み、その接頭辞が実行時刻を含むためです。
+絵が同じかどうかを見るときは、ファイルのハッシュではなく画素で比べてください。
 
 ## 入力画像が要らないプロファイル
 
@@ -200,8 +211,9 @@ strength 0.55 は 0.55、0.75、0.95 を同一seedで比べた結果で、強く
 `generation_settings` は上書きを適用したあとのグラフから作られるので、`samplers` に出るのは実際に流れた値です。
 `setting_overrides` のほうは、どのフィールドがどのノードで上書きされたかを記録します。値そのものが入るのは width、height、denoise だけです。
 
-`flux2-klein-edit` だけは `samplers` に steps と cfg が出ません。
-samplerノードが設定を自前で持たないためで、値は `node_inputs` の `Flux2Scheduler` と `CFGGuider` にあります。
+`flux2-klein-edit` だけは `samplers` に steps、cfg、sampler_name のどれも出ません。
+samplerノードが設定を自前で持たないためで、`--steps` や `--sampler` で上書きした場合も含め、値は `node_inputs` の `Flux2Scheduler`（steps）、`CFGGuider`（cfg）、`KSamplerSelect`（sampler_name）にあります。
+どのノードへ落ちたかは `setting_overrides.sampler_nodes` で確かめられます。
 `esrgan-upscale` は samplerも空Latentも持たないので、`samplers` と `latents` が空になり、`results[].seed` は `null` になります。
 
 失敗した実行にも同じファイルが残ります。
