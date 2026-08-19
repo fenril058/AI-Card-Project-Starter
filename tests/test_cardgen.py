@@ -412,54 +412,83 @@ class CardGenTests(unittest.TestCase):
             inputs = workflow[node_id]["inputs"]
             self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
 
-    def test_a_scaled_latent_must_stay_on_the_eight_grid(self) -> None:
-        """Latents are stored at 1/8 resolution, so their width and height must
-        divide by 8. Pixel-space nodes carry no such rule, which is why the
-        check is by node kind and not applied to every scaled value."""
-        workflow = {
-            "5": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {"width": 64, "height": 64, "batch_size": 1},
-            },
-            "9": {
-                "class_type": "ImageScale",
-                "inputs": {"width": 96, "height": 96, "crop": "disabled"},
-            },
-        }
-        bindings = {
-            "resolution_nodes": [
-                {"node_id": "9", "scale": 1.5},
-                {"node_id": "5", "scale": 1},
-            ]
-        }
-        # 64*1.5 = 96 on the pixel node: fine, and not a multiple of 8 is fine.
+    def test_every_written_resolution_must_stay_on_the_eight_grid(self) -> None:
+        """Not just latents. wai-hires node 23 is an ImageScale, but its output
+        feeds VAEEncode, so an off-grid value there is not free. Measured on
+        this machine: --width 840 --height 1224 wrote node 23 = 1260x1836, and
+        the saved PNG came out 1256x1832 -- ComfyUI cropped to the grid and the
+        run record kept the uncropped number. A record that misstates the output
+        size is worse than a refused run, so every written value must divide by
+        8 whatever the node kind."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
         self.assertEqual(
-            cardgen.apply_latent_size(workflow, 72, 72, bindings), ["5", "9"]
+            cardgen.load_json(profile["workflow_path"])["23"]["class_type"],
+            "ImageScale",
         )
-        self.assertEqual(workflow["9"]["inputs"]["width"], 108)
 
-        latent_scaled = {
-            "5": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {"width": 64, "height": 64, "batch_size": 1},
-            },
-            "6": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {"width": 96, "height": 96, "batch_size": 1},
-            },
-        }
+        # 840 * 1.5 = 1260, and 1260 % 8 == 4.
         with self.assertRaises(cardgen.CardGenError):
             cardgen.apply_latent_size(
-                latent_scaled,
-                72,
-                72,
+                cardgen.load_json(profile["workflow_path"]),
+                840,
+                1224,
+                profile["bindings"],
+            )
+        # 832 * 1.5 = 1248, which is on the grid.
+        workflow = cardgen.load_json(profile["workflow_path"])
+        cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        self.assertEqual(workflow["23"]["inputs"]["width"], 1248)
+        self.assertEqual(workflow["23"]["inputs"]["width"] % 8, 0)
+
+        # The scale-1 nodes are safe by construction: --width is already forced
+        # to a multiple of 8. It is the scaled ones that need the check.
+        self.assertEqual(workflow["5"]["inputs"]["width"], 832)
+
+    def test_a_resolution_list_missing_a_non_latent_node_is_refused(self) -> None:
+        """The completeness guard cannot look at LATENT_TYPES only: the reason
+        this binding exists is that latents are not the only nodes stating a
+        resolution. wai-controlnet node 31 scales the scribble to match the base
+        latent and feeds ControlNetApplyAdvanced with crop 'center', so leaving
+        it behind re-crops the hint against a different aspect and moves the
+        composition, with nothing raised."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-controlnet")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["31"]["class_type"], "ImageScale")
+        self.assertNotIn(workflow["31"]["class_type"], cardgen.LATENT_TYPES)
+        self.assertEqual(workflow["31"]["inputs"]["crop"], "center")
+
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.resolve_resolution_nodes(
+                workflow,
                 {
                     "resolution_nodes": [
                         {"node_id": "5", "scale": 1},
-                        {"node_id": "6", "scale": 1.5},
+                        {"node_id": "23", "scale": 1.5},
                     ]
                 },
             )
+        # The shipped list covers all three and still resolves.
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(workflow, profile["bindings"]),
+            ["23", "31", "5"],
+        )
+
+    def test_a_repeated_resolution_node_is_still_allowed(self) -> None:
+        """Listing a node twice writes the same value twice and shows up twice
+        in the run record. That was looked at and left alone; the rewrite must
+        not quietly start rejecting or de-duplicating it."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        workflow = cardgen.load_json(
+            cardgen.load_profile(app, "flux2-klein-edit")["workflow_path"]
+        )
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(
+                workflow, {"resolution_nodes": ["62", "66", "62"]}
+            ),
+            ["62", "62", "66"],
+        )
 
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.

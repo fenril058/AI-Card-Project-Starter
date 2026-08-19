@@ -967,12 +967,10 @@ def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] 
             )
         entries.append({"node_id": node_id, "scale": float(scale)})
 
-    seen = [e["node_id"] for e in entries]
-    if len(set(seen)) != len(seen):
-        raise CardGenError(
-            "bindings.resolution_nodesに同じnode_idが複数あります: "
-            f"{'、'.join(sorted({n for n in seen if seen.count(n) > 1}))}"
-        )
+    # 同じノードを2回挙げること自体は許す。同じ値を2回書くだけで害が無く、記録に
+    # 2回載る以上のことは起きない。倍率が食い違う場合は、下のワークフロー照合が
+    # 必ず落とす(base*s1 == base*s2 は base が0のときしか成り立たない)ので、
+    # ここに専用の検査は置かない。
     if not any(e["scale"] == 1.0 for e in entries):
         raise CardGenError(
             "bindings.resolution_nodesにscale 1のノードがありません。"
@@ -1029,22 +1027,27 @@ def resolve_resolution_nodes(
     # 列挙した側だけが動く。この列挙が防ぐはずの食い違いが、逆向きに、しかも
     # エラーを出さずに起きる。
     listed = {e["node_id"] for e in entries}
+    # LATENT_TYPES に限ってはいけない。このbindingが存在する理由が「解像度を述べる
+    # のはLatentだけではない」ことなので、取りこぼしの検査も同じ範囲を見る必要が
+    # ある。wai-controlnet の node 31 (ImageScale) を落とすと、ラフ線画だけが元の
+    # 寸法のまま中央クロップされ、構図が変わる。
     uncovered = sorted(
         node_id
         for node_id, node in workflow.items()
         if isinstance(node, dict)
-        and node.get("class_type") in LATENT_TYPES
         and isinstance(node.get("inputs"), dict)
-        and "width" in node["inputs"]
-        and "height" in node["inputs"]
+        and isinstance(node["inputs"].get("width"), int)
+        and not isinstance(node["inputs"].get("width"), bool)
+        and isinstance(node["inputs"].get("height"), int)
+        and not isinstance(node["inputs"].get("height"), bool)
         and str(node_id) not in listed
     )
     if uncovered:
         raise CardGenError(
-            "bindings.resolution_nodesが空Latentノードを列挙していません: "
+            "bindings.resolution_nodesが解像度を述べるノードを列挙していません: "
             f"node {'、'.join(uncovered)}。"
-            "列挙を書くと空Latentの走査は行われないので、解像度を述べている"
-            "ノードをすべて挙げてください。"
+            "列挙を書くと走査は行われないので、width/heightを持つノードを"
+            "すべて挙げてください。"
         )
 
     # 宣言した倍率がワークフローの現在値と合っているかを見る。合っていなければ、
@@ -1065,7 +1068,9 @@ def resolve_resolution_nodes(
                 f"node {node_id} は {sizes[node_id][0]}x{sizes[node_id][1]} だが、"
                 f"scale {scale:g} なら {want[0]}x{want[1]} のはずです。"
             )
-    return sorted(listed)
+    # 重複は残したまま返す。同じノードを2回挙げるのは無害で、記録に2回載るだけ。
+    # 黙って畳むと、書いた通りに記録されなくなる。
+    return sorted(e["node_id"] for e in entries)
 
 
 def apply_latent_size(
@@ -1100,14 +1105,17 @@ def apply_latent_size(
                     f"({width}x{height} -> {scaled_w:g}x{scaled_h:g})"
                 )
             scaled_w, scaled_h = int(scaled_w), int(scaled_h)
-            if node.get("class_type") in LATENT_TYPES and (
-                scaled_w % 8 or scaled_h % 8
-            ):
-                # 空Latentは8分の1解像度で持つので8の倍数でなければならない。
-                # ピクセル空間のノードにこの制約は無いので、種別で分ける。
+            if scaled_w % 8 or scaled_h % 8:
+                # ノード種別では分けられない。ピクセル空間の ImageScale でも、
+                # 出力が VAEEncode へ入るなら8の倍数が要る。wai-hires の node 23 が
+                # それで、--width 840 は node 23 を 1260x1836 にする。ComfyUI は
+                # これを 1256x1832 へ黙ってクロップし、記録だけが 1260x1836 のまま
+                # 残る。実測で確認した。記録が出力寸法について嘘をつくので、
+                # 書き込む値はすべて8の倍数であることを要求する。
                 raise CardGenError(
-                    f"空Latentの解像度が8の倍数になりません: node {node_id} "
-                    f"({scaled_w}x{scaled_h})。--widthと--heightを選び直してください。"
+                    f"解像度が8の倍数になりません: node {node_id} "
+                    f"({scaled_w}x{scaled_h})。scale {scale:g} を掛けても8の倍数に"
+                    f"なる--widthと--heightを選んでください。"
                 )
             node["inputs"]["width"] = scaled_w
             node["inputs"]["height"] = scaled_h

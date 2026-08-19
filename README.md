@@ -237,7 +237,7 @@ uv run python cardgen.py --profile wai-single generate `
   --scheduler karras
 ```
 
-`--width` と `--height` は同時に、64以上かつ8の倍数で指定します。指すのは**基準解像度**であって、保存される画像の寸法とは限りません。1つのグラフが解像度を複数箇所に述べる場合、プロファイルの `bindings.resolution_nodes` が各ノードの倍率を持ち、基準に比例して一緒に動きます。`wai-hires` と `wai-controlnet` は base pass が倍率1、Hires後の出力寸法が倍率1.5なので、`--width 832 --height 1216` なら出力は 1248x1824 になります。Sampler設定は該当入力を持つ全Samplerノードへ適用されますが、プロファイルが同名の `bindings` を持つ項目は指名された1ノードだけに書き込まれます。
+`--width` と `--height` は同時に、64以上かつ8の倍数で指定します。指すのは**基準解像度**であって、保存される画像の寸法とは限りません。1つのグラフが解像度を複数箇所に述べる場合、プロファイルの `bindings.resolution_nodes` が各ノードの倍率を持ち、基準に比例して一緒に動きます。`wai-hires` と `wai-controlnet` は base pass が倍率1、Hires後の出力寸法が倍率1.5なので、`--width 832 --height 1216` なら出力は 1248x1824 になります。**倍率を掛けた値も8の倍数でなければなりません。** この2プロファイルでは実質16の倍数になります。8の倍数にならない値は実行前にエラーになります（ComfyUIが黙って切り詰め、記録だけが元の値のまま残るため）。Sampler設定は該当入力を持つ全Samplerノードへ適用されますが、プロファイルが同名の `bindings` を持つ項目は指名された1ノードだけに書き込まれます。
 
 `--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
 
