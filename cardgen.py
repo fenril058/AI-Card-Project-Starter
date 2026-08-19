@@ -433,6 +433,28 @@ def check_binding_keys(bindings: dict[str, Any]) -> None:
         )
 
 
+def check_sampler_binding_fields(bindings: dict[str, Any]) -> None:
+    """Refuse a sampler binding that names an input other than the option itself.
+
+    seed and input_image legitimately name a different input (noise_seed, image),
+    so the rule cannot be general. ComfyUI fixes the names of these four, and
+    every shipped profile already matches. Left unchecked, bindings.steps naming
+    "width" passes validate and then writes --steps over the width --width just
+    set on that same node, which is the mismatch resolution_nodes exists to stop.
+    """
+    for field in SAMPLER_OVERRIDE_FIELDS:
+        binding = bindings.get(field)
+        if not isinstance(binding, dict):
+            continue
+        named = binding.get("field")
+        if named != field:
+            raise CardGenError(
+                f"bindings.{field}が指す入力は{field}でなければなりません: "
+                f"field={named!r}。ComfyUIの入力名は固定で、別の入力を指すと"
+                f"--{field}が無関係な設定を書き換えます。"
+            )
+
+
 def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any]:
     profile_id = requested_id or str(app["default_profile"])
     path = profile_path(app, profile_id)
@@ -486,6 +508,7 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
         raise CardGenError("bindingsはオブジェクトで指定してください。")
     if isinstance(bindings, dict):
         check_binding_keys(bindings)
+        check_sampler_binding_fields(bindings)
 
     return profile
 
@@ -1494,11 +1517,11 @@ def command_generate(
 
     model_uses = verify_approved_models(workflow, approved)
 
-    latent_nodes: list[str] = []
+    resolution_nodes: list[str] = []
     if args.width is not None or args.height is not None:
         if args.width is None or args.height is None:
             raise CardGenError("--widthと--heightは同時に指定してください。")
-        latent_nodes = apply_latent_size(
+        resolution_nodes = apply_latent_size(
             workflow,
             args.width,
             args.height,
@@ -1658,7 +1681,7 @@ def command_generate(
         }
 
     metadata = {
-        "schema_version": 6,
+        "schema_version": 7,
         "status": "error" if failure is not None else "ok",
         "failure": failure,
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -1678,7 +1701,10 @@ def command_generate(
         "setting_overrides": {
             "width": args.width,
             "height": args.height,
-            "latent_nodes": latent_nodes,
+            # Not "latent_nodes": a profile may list a node that states the
+            # resolution without being a latent. flux2-klein-edit records
+            # Flux2Scheduler here. Same name and shape as validate's key.
+            "resolution_nodes": resolution_nodes,
             "sampler_nodes": sampler_overrides,
             "denoise": args.denoise,
             "denoise_node": denoise_node,

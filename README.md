@@ -276,7 +276,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 ## 出力と再現メタデータ
 
-画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 6です。
+画像と `*_metadata.json` は `outputs/` に保存されます。現在のメタデータschemaはversion 7です。
 
 主な記録内容:
 

@@ -453,6 +453,61 @@ class CardGenTests(unittest.TestCase):
             {field: {"node_id": "1", "field": field} for field in SAMPLER_FIELDS}
         )
 
+    def test_a_sampler_binding_must_name_its_own_input(self) -> None:
+        """A sampler binding naming a neighbouring input is writable and wrong.
+
+        --steps then lands on that neighbour. On flux2-klein-edit, pointing
+        bindings.steps at "width" makes --steps overwrite the width --width just
+        set on node 62, leaving it disagreeing with the latent -- the mismatch
+        resolution_nodes exists to prevent, with no error raised.
+        """
+        for named in ("width", "height", "cfg", "denoise", None):
+            with self.subTest(field=named):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.check_sampler_binding_fields(
+                        {"steps": {"node_id": "62", "field": named}}
+                    )
+        # seed and input_image legitimately name a different input, so the rule
+        # is scoped to the four whose ComfyUI input names are fixed.
+        cardgen.check_sampler_binding_fields(
+            {"seed": {"node_id": "73", "field": "noise_seed"}}
+        )
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        for profile_id in ("flux2-klein-edit", "wai-hires"):
+            cardgen.load_profile(app, profile_id)
+
+    def test_the_run_record_does_not_call_them_latent_nodes(self) -> None:
+        """A listed resolution node need not be a latent -- flux2-klein-edit
+        records Flux2Scheduler among them -- so the key cannot claim otherwise.
+        Same name and shape as validate's resolution_nodes."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
+            out = Path(temp_dir)
+            app["output_dir_path"] = out
+            image = out / "fake.png"
+            image.write_bytes(b"not really a png")
+            with unittest.mock.patch.object(
+                cardgen, "queue_prompt", return_value="pid-1"
+            ), unittest.mock.patch.object(
+                cardgen, "wait_for_history", return_value={}
+            ), unittest.mock.patch.object(
+                cardgen, "download_outputs", return_value=[image]
+            ), unittest.mock.patch.object(
+                cardgen, "comfy_versions", return_value={}
+            ):
+                code = cardgen.command_generate(
+                    self._generate_args(width=832, height=1216), app, "wai-hires"
+                )
+            self.assertEqual(code, 0)
+            meta = json.loads(
+                next(out.glob("*_metadata.json")).read_text(encoding="utf-8")
+            )
+
+        overrides = meta["setting_overrides"]
+        self.assertNotIn("latent_nodes", overrides)
+        self.assertEqual(overrides["resolution_nodes"], ["5"])
+        self.assertEqual(meta["schema_version"], 7)
+
     def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
         profile = cardgen.load_profile(app, "wai-hires")
@@ -503,7 +558,7 @@ class CardGenTests(unittest.TestCase):
             self.assertEqual(len(written), 1)
             meta = json.loads(written[0].read_text(encoding="utf-8"))
 
-        self.assertEqual(meta["schema_version"], 6)
+        self.assertEqual(meta["schema_version"], 7)
         self.assertEqual(meta["status"], "error")
         self.assertEqual(meta["results"], [])
         self.assertEqual(meta["failure"]["error_type"], "CardGenError")
