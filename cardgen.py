@@ -755,7 +755,11 @@ def bound_node(
 def resolve_bound_node(
     workflow: dict[str, Any], bindings: dict[str, Any], label: str
 ) -> tuple[str, dict[str, Any], str]:
-    """Guard and resolve one binding without writing it. validate's entry point."""
+    """Guard and resolve one binding without writing it.
+
+    Both sides go through here: validate stops at the resolution, and
+    set_bound_value writes into what this returns.
+    """
     binding = bindings.get(label)
     if not isinstance(binding, dict):
         raise CardGenError(f"bindings.{label}が不正です。")
@@ -1110,7 +1114,7 @@ def resolve_resolution_nodes(
     return sorted(e["node_id"] for e in entries)
 
 
-def apply_latent_size(
+def apply_resolution(
     workflow: dict[str, Any],
     width: int,
     height: int,
@@ -1347,7 +1351,7 @@ def snapshot_node_inputs(workflow: dict[str, Any]) -> dict[str, Any]:
         literals = {
             field: value
             for field, value in sorted(inputs.items())
-            if not isinstance(value, (list, dict)) and field not in withheld
+            if not is_link(value) and field not in withheld
         }
         if literals:
             snapshot[str(node_id)] = {
@@ -1450,9 +1454,9 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         # a run that has already uploaded an image and queued work.
         resolution_nodes = resolve_resolution_nodes(probe, bindings) or []
         for field in SAMPLER_OVERRIDE_FIELDS:
-            # generate reads a null binding as "no binding" and falls back to
-            # the blanket path. validate has to read it the same way, or it
-            # refuses a profile the run would have accepted.
+            # An absent binding means the blanket path handles the field.
+            # A null one cannot reach here: load_profile refuses it, because
+            # null and absent read alike and the option would vanish silently.
             if bindings.get(field) is None:
                 continue
             # Resolve only. validate has no value to write, and the node need
@@ -1700,7 +1704,7 @@ def command_generate(
     if args.width is not None or args.height is not None:
         if args.width is None or args.height is None:
             raise CardGenError("--widthと--heightは同時に指定してください。")
-        resolution_nodes = apply_latent_size(
+        resolution_nodes = apply_resolution(
             workflow,
             args.width,
             args.height,

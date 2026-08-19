@@ -251,9 +251,9 @@ class CardGenTests(unittest.TestCase):
                 workflow = cardgen.load_json(profile["workflow_path"])
                 if latents is None:
                     with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_latent_size(workflow, 832, 1216, bindings)
+                        cardgen.apply_resolution(workflow, 832, 1216, bindings)
                 else:
-                    changed = cardgen.apply_latent_size(workflow, 832, 1216, bindings)
+                    changed = cardgen.apply_resolution(workflow, 832, 1216, bindings)
                     self.assertEqual(changed, latents)
                     # A listed node may state the size at its own scale, so read
                     # back what the profile declares rather than one value.
@@ -318,7 +318,7 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(workflow["62"]["class_type"], "Flux2Scheduler")
         self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
 
-        changed = cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        changed = cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
         self.assertEqual(changed, ["62", "66"])
         for node_id in ("62", "66"):
             inputs = workflow[node_id]["inputs"]
@@ -331,7 +331,7 @@ class CardGenTests(unittest.TestCase):
         for broken in (["62", "999"], ["62", "64"], "62", []):
             with self.subTest(resolution_nodes=broken):
                 with self.assertRaises(cardgen.CardGenError):
-                    cardgen.apply_latent_size(
+                    cardgen.apply_resolution(
                         workflow, 832, 1216, {"resolution_nodes": broken}
                     )
 
@@ -346,7 +346,7 @@ class CardGenTests(unittest.TestCase):
 
         # 62 is Flux2Scheduler: real, resolution-bearing, and not the latent.
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 workflow, 832, 1216, {"resolution_nodes": ["62"]}
             )
         self.assertEqual(workflow["62"]["inputs"]["width"], 1024)
@@ -370,7 +370,7 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(workflow["5"]["class_type"], "EmptyLatentImage")
         self.assertEqual(workflow["23"]["class_type"], "ImageScale")
 
-        changed = cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        changed = cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
         self.assertEqual(changed, ["23", "5"])
         self.assertEqual((workflow["5"]["inputs"]["width"],
                           workflow["5"]["inputs"]["height"]), (832, 1216))
@@ -405,7 +405,7 @@ class CardGenTests(unittest.TestCase):
         workflow = cardgen.load_json(profile["workflow_path"])
         entries = cardgen.resolution_entries({"resolution_nodes": ["62", "66"]})
         self.assertEqual([e["scale"] for e in entries], [1.0, 1.0])
-        cardgen.apply_latent_size(
+        cardgen.apply_resolution(
             workflow, 832, 1216, {"resolution_nodes": ["62", "66"]}
         )
         for node_id in ("62", "66"):
@@ -429,7 +429,7 @@ class CardGenTests(unittest.TestCase):
 
         # 840 * 1.5 = 1260, and 1260 % 8 == 4.
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 cardgen.load_json(profile["workflow_path"]),
                 840,
                 1224,
@@ -437,7 +437,7 @@ class CardGenTests(unittest.TestCase):
             )
         # 832 * 1.5 = 1248, which is on the grid.
         workflow = cardgen.load_json(profile["workflow_path"])
-        cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
         self.assertEqual(workflow["23"]["inputs"]["width"], 1248)
         self.assertEqual(workflow["23"]["inputs"]["width"] % 8, 0)
 
@@ -518,7 +518,7 @@ class CardGenTests(unittest.TestCase):
         )
         written = copy.deepcopy(workflow)
         self.assertEqual(
-            cardgen.apply_latent_size(written, 1040, 1360, bindings), ["5", "9"]
+            cardgen.apply_resolution(written, 1040, 1360, bindings), ["5", "9"]
         )
         self.assertEqual(written["9"]["inputs"]["height"], 1904)
 
@@ -534,7 +534,7 @@ class CardGenTests(unittest.TestCase):
             },
         }
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 fractional,
                 832,
                 832,
@@ -566,10 +566,10 @@ class CardGenTests(unittest.TestCase):
             ]
         }
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(copy.deepcopy(workflow), 64, 64, bindings)
+            cardgen.apply_resolution(copy.deepcopy(workflow), 64, 64, bindings)
         # 128 * 0.5 = 64, exactly the floor, and on the grid.
         written = copy.deepcopy(workflow)
-        cardgen.apply_latent_size(written, 128, 128, bindings)
+        cardgen.apply_resolution(written, 128, 128, bindings)
         self.assertEqual(written["5"]["inputs"]["width"], 64)
 
     def test_an_unknown_key_in_a_resolution_entry_is_refused(self) -> None:
@@ -624,7 +624,7 @@ class CardGenTests(unittest.TestCase):
             "inputs": {"width": ["66", 0], "height": 1216},
         }
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 workflow, 832, 1216, {"resolution_nodes": ["66", "901"]}
             )
         self.assertEqual(workflow["901"]["inputs"]["width"], ["66", 0])
@@ -830,7 +830,7 @@ class CardGenTests(unittest.TestCase):
             },
         }
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(latent, 832, 1216)
+            cardgen.apply_resolution(latent, 832, 1216)
         self.assertEqual(latent["5"]["inputs"]["width"], ["1", 0])
 
     def test_is_link_separates_a_setting_from_an_edge(self) -> None:
