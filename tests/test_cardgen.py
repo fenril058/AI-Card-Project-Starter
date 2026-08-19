@@ -325,6 +325,29 @@ class CardGenTests(unittest.TestCase):
                         workflow, 832, 1216, {"resolution_nodes": broken}
                     )
 
+    def test_a_resolution_list_missing_the_latent_is_refused(self) -> None:
+        """Listing nodes turns the empty-latent scan off, so an incomplete list
+        would move the scheduler while the output size stayed put -- the very
+        mismatch the listing exists to prevent, inverted and silent."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
+
+        # 62 is Flux2Scheduler: real, resolution-bearing, and not the latent.
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(
+                workflow, 832, 1216, {"resolution_nodes": ["62"]}
+            )
+        self.assertEqual(workflow["62"]["inputs"]["width"], 1024)
+        self.assertEqual(workflow["66"]["inputs"]["width"], 1024)
+
+        # The profile's own list covers both, so it still resolves.
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(workflow, profile["bindings"]),
+            ["62", "66"],
+        )
+
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.
 

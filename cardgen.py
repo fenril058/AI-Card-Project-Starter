@@ -926,6 +926,27 @@ def resolve_resolution_nodes(
                 "bindings.resolution_nodesが指しているのは設定ではなく"
                 f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
             )
+
+    # 列挙を書くと空Latent走査は行われない。取りこぼすと、出力サイズは既定のまま
+    # 列挙した側だけが動く。この列挙が防ぐはずの食い違いが、逆向きに、しかも
+    # エラーを出さずに起きる。
+    uncovered = sorted(
+        node_id
+        for node_id, node in workflow.items()
+        if isinstance(node, dict)
+        and node.get("class_type") in LATENT_TYPES
+        and isinstance(node.get("inputs"), dict)
+        and "width" in node["inputs"]
+        and "height" in node["inputs"]
+        and str(node_id) not in binding
+    )
+    if uncovered:
+        raise CardGenError(
+            "bindings.resolution_nodesが空Latentノードを列挙していません: "
+            f"node {'、'.join(uncovered)}。"
+            "列挙を書くと空Latentの走査は行われないので、解像度を述べている"
+            "ノードをすべて挙げてください。"
+        )
     return sorted(binding)
 
 
