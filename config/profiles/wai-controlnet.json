@@ -8,19 +8,51 @@
     "multi_pass": true
   },
   "bindings": {
-    "positive_prompt": {"node_id": "6", "field": "text"},
-    "negative_prompt": {"node_id": "7", "field": "text"},
-    "seed": {"node_id": "10", "field": "seed"},
-    "input_image": {"node_id": "30", "field": "image"}
+    "positive_prompt": {
+      "node_id": "6",
+      "field": "text"
+    },
+    "negative_prompt": {
+      "node_id": "7",
+      "field": "text"
+    },
+    "seed": {
+      "node_id": "10",
+      "field": "seed"
+    },
+    "input_image": {
+      "node_id": "30",
+      "field": "image"
+    },
+    "resolution_nodes": [
+      {
+        "node_id": "5",
+        "scale": 1
+      },
+      {
+        "node_id": "31",
+        "scale": 1
+      },
+      {
+        "node_id": "23",
+        "scale": 1.5
+      }
+    ]
   },
   "approved_models": {
-    "checkpoints": ["waiIllustriousSDXL_v170.safetensors"],
+    "checkpoints": [
+      "waiIllustriousSDXL_v170.safetensors"
+    ],
     "unet": [],
     "clip": [],
     "vae": [],
     "loras": [],
-    "upscale_models": ["RealESRGAN_x4plus_anime_6B.pth"],
-    "controlnet": ["xinsir_controlnet_scribble_sdxl_v1.safetensors"]
+    "upscale_models": [
+      "RealESRGAN_x4plus_anime_6B.pth"
+    ],
+    "controlnet": [
+      "xinsir_controlnet_scribble_sdxl_v1.safetensors"
+    ]
   },
   "defaults": {
     "negative_prompt": "bad quality, worst quality, worst detail, sketch, censor, low quality, lowres, blurry, jpeg artifacts, readable text, letters, logo, watermark, signature, extra fingers, missing fingers, fused fingers, malformed hands, deformed anatomy, duplicate person, multiple views, photorealistic, 3d render"
@@ -34,6 +66,7 @@
     "解釈しなくなる。0.95 では弦が画面外へ突き抜けた。ラフの線が硬い直線を",
     "含むほど下げること。",
     "end_percent は 0.4 / 0.7 / 1.0 を比較したが差が出なかった。end_percent 間の",
-    "違いより seed 間の違いの方が大きい。触るなら strength を触ること。"
+    "違いより seed 間の違いの方が大きい。触るなら strength を触ること。",
+    "node 31 はラフ線画を base latent と同じ寸法へ揃えるスケールなので node 5 と等倍。node 23 は Hires 後の出力寸法で1.5倍。--width は node 5 を指し、残り2つが追従する。"
   ]
 }

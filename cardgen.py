@@ -932,6 +932,55 @@ def apply_checkpoint_override(
     return sorted(changed)
 
 
+def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] | None:
+    """Normalise bindings.resolution_nodes into {node_id, scale} entries.
+
+    A bare node id means scale 1. A graph may state the size more than once at
+    different sizes: wai-hires keeps the base in EmptyLatentImage and the hires
+    target in ImageScale at 1.5x, so one value written everywhere is wrong.
+    """
+    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
+    if binding is None:
+        return None
+    if not isinstance(binding, list) or not binding:
+        raise CardGenError(
+            "bindings.resolution_nodesは空でない配列で指定してください。"
+        )
+
+    entries: list[dict[str, Any]] = []
+    for item in binding:
+        if isinstance(item, str) and item:
+            entries.append({"node_id": item, "scale": 1.0})
+            continue
+        if not isinstance(item, dict):
+            raise CardGenError(
+                "bindings.resolution_nodesの要素はnode_id文字列か"
+                "{node_id, scale}オブジェクトです。"
+            )
+        node_id = item.get("node_id")
+        scale = item.get("scale", 1.0)
+        if not isinstance(node_id, str) or not node_id:
+            raise CardGenError("bindings.resolution_nodesのnode_idが不正です。")
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
+            raise CardGenError(
+                f"bindings.resolution_nodesのscaleは正の数です: node {node_id}"
+            )
+        entries.append({"node_id": node_id, "scale": float(scale)})
+
+    seen = [e["node_id"] for e in entries]
+    if len(set(seen)) != len(seen):
+        raise CardGenError(
+            "bindings.resolution_nodesに同じnode_idが複数あります: "
+            f"{'、'.join(sorted({n for n in seen if seen.count(n) > 1}))}"
+        )
+    if not any(e["scale"] == 1.0 for e in entries):
+        raise CardGenError(
+            "bindings.resolution_nodesにscale 1のノードがありません。"
+            "--widthが指す基準の解像度を持つノードをscale 1で挙げてください。"
+        )
+    return entries
+
+
 def resolve_resolution_nodes(
     workflow: dict[str, Any], bindings: dict[str, Any] | None
 ) -> list[str] | None:
@@ -940,19 +989,13 @@ def resolve_resolution_nodes(
     Returns None when the profile lists none, which leaves the empty-latent scan
     in charge. Resolving without writing lets validate catch a stale node_id.
     """
-    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
-    if binding is None:
+    entries = resolution_entries(bindings)
+    if entries is None:
         return None
-    if (
-        not isinstance(binding, list)
-        or not binding
-        or not all(isinstance(node_id, str) and node_id for node_id in binding)
-    ):
-        raise CardGenError(
-            "bindings.resolution_nodesは空でない文字列の配列で指定してください。"
-        )
 
-    for node_id in binding:
+    sizes: dict[str, tuple[int, int]] = {}
+    for entry in entries:
+        node_id = entry["node_id"]
         node = workflow.get(node_id)
         inputs = node.get("inputs") if isinstance(node, dict) else None
         if not isinstance(inputs, dict):
@@ -975,10 +1018,17 @@ def resolve_resolution_nodes(
                 "bindings.resolution_nodesが指しているのは設定ではなく"
                 f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
             )
+        if not all(isinstance(inputs[f], int) for f in ("width", "height")):
+            raise CardGenError(
+                f"bindings.resolution_nodesのwidth/heightが整数ではありません: "
+                f"node {node_id}"
+            )
+        sizes[node_id] = (inputs["width"], inputs["height"])
 
     # 列挙を書くと空Latent走査は行われない。取りこぼすと、出力サイズは既定のまま
     # 列挙した側だけが動く。この列挙が防ぐはずの食い違いが、逆向きに、しかも
     # エラーを出さずに起きる。
+    listed = {e["node_id"] for e in entries}
     uncovered = sorted(
         node_id
         for node_id, node in workflow.items()
@@ -987,7 +1037,7 @@ def resolve_resolution_nodes(
         and isinstance(node.get("inputs"), dict)
         and "width" in node["inputs"]
         and "height" in node["inputs"]
-        and str(node_id) not in binding
+        and str(node_id) not in listed
     )
     if uncovered:
         raise CardGenError(
@@ -996,7 +1046,26 @@ def resolve_resolution_nodes(
             "列挙を書くと空Latentの走査は行われないので、解像度を述べている"
             "ノードをすべて挙げてください。"
         )
-    return sorted(binding)
+
+    # 宣言した倍率がワークフローの現在値と合っているかを見る。合っていなければ、
+    # ワークフローを編集して比率が変わったか、倍率の書き間違いのどちらか。
+    bases = {sizes[e["node_id"]] for e in entries if e["scale"] == 1.0}
+    if len(bases) != 1:
+        raise CardGenError(
+            "bindings.resolution_nodesのscale 1のノードが同じ解像度では"
+            f"ありません: {sorted(bases)}"
+        )
+    base_w, base_h = bases.pop()
+    for entry in entries:
+        node_id, scale = entry["node_id"], entry["scale"]
+        want = (round(base_w * scale), round(base_h * scale))
+        if sizes[node_id] != want:
+            raise CardGenError(
+                f"bindings.resolution_nodesのscaleがワークフローと一致しません: "
+                f"node {node_id} は {sizes[node_id][0]}x{sizes[node_id][1]} だが、"
+                f"scale {scale:g} なら {want[0]}x{want[1]} のはずです。"
+            )
+    return sorted(listed)
 
 
 def apply_latent_size(
@@ -1020,10 +1089,28 @@ def apply_latent_size(
 
     listed = resolve_resolution_nodes(workflow, bindings)
     if listed is not None:
-        for node_id in listed:
-            inputs = workflow[node_id]["inputs"]
-            inputs["width"] = width
-            inputs["height"] = height
+        entries = resolution_entries(bindings) or []
+        for entry in entries:
+            node_id, scale = entry["node_id"], entry["scale"]
+            node = workflow[node_id]
+            scaled_w, scaled_h = width * scale, height * scale
+            if scaled_w != int(scaled_w) or scaled_h != int(scaled_h):
+                raise CardGenError(
+                    f"scale {scale:g} を掛けると整数になりません: node {node_id} "
+                    f"({width}x{height} -> {scaled_w:g}x{scaled_h:g})"
+                )
+            scaled_w, scaled_h = int(scaled_w), int(scaled_h)
+            if node.get("class_type") in LATENT_TYPES and (
+                scaled_w % 8 or scaled_h % 8
+            ):
+                # 空Latentは8分の1解像度で持つので8の倍数でなければならない。
+                # ピクセル空間のノードにこの制約は無いので、種別で分ける。
+                raise CardGenError(
+                    f"空Latentの解像度が8の倍数になりません: node {node_id} "
+                    f"({scaled_w}x{scaled_h})。--widthと--heightを選び直してください。"
+                )
+            node["inputs"]["width"] = scaled_w
+            node["inputs"]["height"] = scaled_h
         return listed
 
     changed: list[str] = []
@@ -1832,10 +1919,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--seed", type=int)
     generate.add_argument("--timeout", type=int)
     generate.add_argument(
-        "--width", type=int, help="出力幅（8の倍数、--heightと同時指定）"
+        "--width", type=int, help="基準解像度の幅（8の倍数、--heightと同時指定）"
     )
     generate.add_argument(
-        "--height", type=int, help="出力高さ（8の倍数、--widthと同時指定）"
+        "--height", type=int, help="基準解像度の高さ（8の倍数、--widthと同時指定）"
     )
     generate.add_argument("--steps", type=int, help="サンプリングステップ数")
     generate.add_argument("--cfg", type=float, help="CFG scale")
