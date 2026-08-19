@@ -401,23 +401,48 @@ class CardGenTests(unittest.TestCase):
                 with self.assertRaises(cardgen.CardGenError):
                     cardgen.validate_profile_workflow(profile)
 
-    def test_a_null_binding_means_the_same_thing_to_validate_and_generate(
-        self,
-    ) -> None:
+    def test_a_null_binding_is_refused_when_the_profile_loads(self) -> None:
+        """null and absent read alike at every use site, so a null binding drops
+        the option without a word: seed swallows --seed, and null prompt
+        bindings make --prompt required and then discard it while the metadata
+        still records what the user typed. Catch it where the profile is read."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        real = json.loads(
+            (ROOT / "config" / "profiles" / "flux2-klein-edit.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        # Go through load_profile, not the checker: a check nothing calls is
+        # worth nothing, and testing the function alone would not notice.
+        for key in ("seed", "positive_prompt", "denoise", "steps",
+                    "input_image", "resolution_nodes"):
+            with self.subTest(key=key):
+                broken = copy.deepcopy(real)
+                broken["bindings"][key] = None
+                with unittest.mock.patch.object(
+                    cardgen, "load_json", return_value=broken
+                ):
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.load_profile(app, "flux2-klein-edit")
+
+        with unittest.mock.patch.object(
+            cardgen, "load_json", return_value=copy.deepcopy(real)
+        ):
+            cardgen.load_profile(app, "flux2-klein-edit")
+        for profile_id in ("flux2-klein-edit", "wai-hires", "esrgan-upscale"):
+            cardgen.load_profile(app, profile_id)
+
+    def test_a_null_seed_binding_would_have_swallowed_the_seed(self) -> None:
+        """The consequence the load-time check exists to prevent. Kept as the
+        record of why null cannot mean "unbound": the runtime cannot tell."""
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
         profile = cardgen.load_profile(app, "flux2-klein-edit")
-        profile["bindings"] = dict(profile["bindings"])
-        profile["bindings"]["steps"] = None
-
-        summary = cardgen.validate_profile_workflow(profile)
-        self.assertNotIn("steps", summary["sampler_nodes"])
-        # generate falls back to the blanket path, which has nowhere to land on
-        # this graph. Both sides read the absence; only the run refuses.
         workflow = cardgen.load_json(profile["workflow_path"])
-        with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_sampler_params(
-                workflow, {"steps": 40}, profile["bindings"]
-            )
+        bindings = dict(profile["bindings"])
+        bindings["seed"] = None
+        self.assertEqual(cardgen.set_bound_seed(workflow, bindings, 1000), (None, None))
+        self.assertEqual(workflow["73"]["inputs"]["noise_seed"], 0)
 
     def test_a_binding_that_names_a_link_is_refused(self) -> None:
         """Settings and links share one inputs dict, so a slip is writable."""
@@ -507,6 +532,50 @@ class CardGenTests(unittest.TestCase):
         self.assertNotIn("latent_nodes", overrides)
         self.assertEqual(overrides["resolution_nodes"], ["5"])
         self.assertEqual(meta["schema_version"], 7)
+
+    def test_the_scan_paths_refuse_to_write_over_an_edge(self) -> None:
+        """bound_node has refused this since it was written; the scan paths that
+        run when a profile names nothing had the same hazard and no guard.
+        Overwriting an edge deletes it and the graph silently means something
+        else, so neither path may write a setting over one."""
+        sampler = {
+            "1": {"class_type": "Elsewhere", "inputs": {}},
+            "9": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "steps": ["1", 0],
+                    "cfg": 6.0,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": 1.0,
+                    "seed": 1,
+                },
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(sampler, {"steps": 40}, None)
+        self.assertEqual(sampler["9"]["inputs"]["steps"], ["1", 0])
+        # A field that is a literal on the same node is still writable.
+        self.assertEqual(
+            cardgen.apply_sampler_params(sampler, {"cfg": 3.5}, None), {"cfg": ["9"]}
+        )
+
+        latent = {
+            "1": {"class_type": "Elsewhere", "inputs": {}},
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": ["1", 0], "height": 1344, "batch_size": 1},
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_latent_size(latent, 832, 1216)
+        self.assertEqual(latent["5"]["inputs"]["width"], ["1", 0])
+
+    def test_is_link_separates_a_setting_from_an_edge(self) -> None:
+        self.assertTrue(cardgen.is_link(["12", 0]))
+        self.assertTrue(cardgen.is_link({"node": "12"}))
+        for setting in (28, 6.0, "euler", "", True, None):
+            self.assertFalse(cardgen.is_link(setting))
 
     def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")

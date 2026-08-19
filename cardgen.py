@@ -423,6 +423,33 @@ def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
     return result
 
 
+def is_link(value: Any) -> bool:
+    """True when a node input carries an edge rather than a setting.
+
+    ComfyUI's API format puts both in one inputs dict; an edge is [node_id, slot].
+    Writing a setting over one deletes the edge and silently changes the graph,
+    so every write path has to ask this before it writes.
+    """
+    return isinstance(value, (list, dict))
+
+
+def check_binding_values(bindings: dict[str, Any]) -> None:
+    """Refuse a binding key whose value is null.
+
+    Absent and null read the same at every use site, so a null lands as "no
+    binding" and the option it names is dropped without a word: bindings.seed
+    null swallows --seed, and null prompt bindings make --prompt required and
+    then discard it while the metadata still records what the user typed.
+    """
+    empty = sorted(key for key, value in bindings.items() if value is None)
+    if empty:
+        raise CardGenError(
+            f"bindingsの値がnullです: {'、'.join(empty)}。"
+            "nullは指名の省略とは違い、そのオプションが黙って捨てられます。"
+            "指名しないならキーごと消してください。"
+        )
+
+
 def check_binding_keys(bindings: dict[str, Any]) -> None:
     """Refuse a bindings key nothing reads, so a typo is not a silent no-op."""
     unknown = sorted(set(bindings) - BINDING_KEYS)
@@ -508,6 +535,7 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
         raise CardGenError("bindingsはオブジェクトで指定してください。")
     if isinstance(bindings, dict):
         check_binding_keys(bindings)
+        check_binding_values(bindings)
         check_sampler_binding_fields(bindings)
 
     return profile
@@ -714,7 +742,7 @@ def bound_node(
     inputs = node.get("inputs")
     if not isinstance(inputs, dict) or field not in inputs:
         raise CardGenError(f"bindings.{label}の入力がありません: node {node_id}")
-    if isinstance(inputs[field], (list, dict)):
+    if is_link(inputs[field]):
         # 他ノードからの接続。設定と接続は同じinputsに並んでいるので、隣を指した
         # bindingは書き込めてしまう。上書きすると辺が消え、グラフの意味が変わる。
         raise CardGenError(
@@ -940,9 +968,7 @@ def resolve_resolution_nodes(
         # bound_nodeと同じ理由。この経路だけがbound_nodeを通らないので、接続を
         # 指した列挙が素通りしていた。上書きすると辺が消え、グラフの意味が変わる。
         linked = [
-            field
-            for field in ("width", "height")
-            if isinstance(inputs[field], (list, dict))
+            field for field in ("width", "height") if is_link(inputs[field])
         ]
         if linked:
             raise CardGenError(
@@ -1006,6 +1032,15 @@ def apply_latent_size(
             continue
         inputs = node.get("inputs")
         if isinstance(inputs, dict) and "width" in inputs and "height" in inputs:
+            linked = [f for f in ("width", "height") if is_link(inputs[f])]
+            if linked:
+                # The size is computed elsewhere in the graph. Writing here would
+                # drop that edge, so say so rather than quietly rewiring.
+                raise CardGenError(
+                    f"空Latentの{'と'.join(linked)}が他ノードからの接続です: "
+                    f"node {node_id}。--widthで上書きすると辺が消えます。"
+                    "解像度を持つノードをbindings.resolution_nodesで指名してください。"
+                )
             inputs["width"] = width
             inputs["height"] = height
             changed.append(str(node_id))
@@ -1026,7 +1061,7 @@ def literal_field_nodes(workflow: dict[str, Any], field: str) -> list[str]:
         inputs = node.get("inputs")
         if not isinstance(inputs, dict) or field not in inputs:
             continue
-        if isinstance(inputs[field], (list, dict)):
+        if is_link(inputs[field]):
             continue
         found.append(str(node_id))
     return sorted(found)
@@ -1066,9 +1101,19 @@ def apply_sampler_params(
         nodes: list[str] = []
         for node_id, node in sampler_nodes(workflow):
             inputs = node.get("inputs")
-            if isinstance(inputs, dict) and field in inputs:
-                inputs[field] = value
-                nodes.append(node_id)
+            if not isinstance(inputs, dict) or field not in inputs:
+                continue
+            if is_link(inputs[field]):
+                # Another node supplies this value. Overwriting it deletes the
+                # edge, and skipping it would apply the option to some samplers
+                # and not others without saying which.
+                raise CardGenError(
+                    f"{sampler_param_option(field)}の書き込み先が他ノードからの"
+                    f"接続です: node {node_id} {field}。上書きすると辺が消えます。"
+                    f"プロファイルへbindings.{field}を書いて指名してください。"
+                )
+            inputs[field] = value
+            nodes.append(node_id)
 
         if not nodes:
             # bindingを勧めてよいのは、そのフィールドを持つノードが実際にある
