@@ -198,7 +198,7 @@ class CardGenTests(unittest.TestCase):
         expected: dict[
             str, tuple[str | None, list[str] | None, dict[str, list[str] | None]]
         ] = {
-            "wai-hires": ("12", ["5"], every_sampler_field(["10", "12"])),
+            "wai-hires": ("12", ["23", "5"], every_sampler_field(["10", "12"])),
             "wai-hires-latent": ("12", ["5"], every_sampler_field(["10", "12"])),
             "wai-single": (None, ["5"], every_sampler_field(["10"])),
             "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
@@ -217,7 +217,7 @@ class CardGenTests(unittest.TestCase):
                 },
             ),
             "esrgan-upscale": (None, None, every_sampler_field(None)),
-            "wai-controlnet": (None, ["5"], every_sampler_field(["10", "12"])),
+            "wai-controlnet": (None, ["23", "31", "5"], every_sampler_field(["10", "12"])),
         }
 
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
@@ -251,13 +251,23 @@ class CardGenTests(unittest.TestCase):
                 workflow = cardgen.load_json(profile["workflow_path"])
                 if latents is None:
                     with self.assertRaises(cardgen.CardGenError):
-                        cardgen.apply_latent_size(workflow, 832, 1216, bindings)
+                        cardgen.apply_resolution(workflow, 832, 1216, bindings)
                 else:
-                    changed = cardgen.apply_latent_size(workflow, 832, 1216, bindings)
+                    changed = cardgen.apply_resolution(workflow, 832, 1216, bindings)
                     self.assertEqual(changed, latents)
+                    # A listed node may state the size at its own scale, so read
+                    # back what the profile declares rather than one value.
+                    scales = {
+                        entry["node_id"]: entry["scale"]
+                        for entry in (cardgen.resolution_entries(bindings) or [])
+                    }
                     for node_id in changed:
                         inputs = workflow[node_id]["inputs"]
-                        self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
+                        scale = scales.get(node_id, 1.0)
+                        self.assertEqual(
+                            (inputs["width"], inputs["height"]),
+                            (int(832 * scale), int(1216 * scale)),
+                        )
 
             self.assertEqual(sorted(sampler_fields), sorted(SAMPLER_FIELDS))
             for field, nodes in sampler_fields.items():
@@ -308,7 +318,7 @@ class CardGenTests(unittest.TestCase):
         self.assertEqual(workflow["62"]["class_type"], "Flux2Scheduler")
         self.assertEqual(workflow["66"]["class_type"], "EmptyFlux2LatentImage")
 
-        changed = cardgen.apply_latent_size(workflow, 832, 1216, profile["bindings"])
+        changed = cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
         self.assertEqual(changed, ["62", "66"])
         for node_id in ("62", "66"):
             inputs = workflow[node_id]["inputs"]
@@ -321,7 +331,7 @@ class CardGenTests(unittest.TestCase):
         for broken in (["62", "999"], ["62", "64"], "62", []):
             with self.subTest(resolution_nodes=broken):
                 with self.assertRaises(cardgen.CardGenError):
-                    cardgen.apply_latent_size(
+                    cardgen.apply_resolution(
                         workflow, 832, 1216, {"resolution_nodes": broken}
                     )
 
@@ -336,7 +346,7 @@ class CardGenTests(unittest.TestCase):
 
         # 62 is Flux2Scheduler: real, resolution-bearing, and not the latent.
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 workflow, 832, 1216, {"resolution_nodes": ["62"]}
             )
         self.assertEqual(workflow["62"]["inputs"]["width"], 1024)
@@ -347,6 +357,364 @@ class CardGenTests(unittest.TestCase):
             cardgen.resolve_resolution_nodes(workflow, profile["bindings"]),
             ["62", "66"],
         )
+
+    def test_a_scaled_resolution_node_follows_the_base(self) -> None:
+        """wai-hires states the size twice at different sizes: EmptyLatentImage
+        holds the base pass and ImageScale holds the 1.5x hires target, and it
+        is ImageScale that decides the saved image. Writing one value into both
+        would be wrong, and writing only the latent left --width unable to
+        change the output at all."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["5"]["class_type"], "EmptyLatentImage")
+        self.assertEqual(workflow["23"]["class_type"], "ImageScale")
+
+        changed = cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
+        self.assertEqual(changed, ["23", "5"])
+        self.assertEqual((workflow["5"]["inputs"]["width"],
+                          workflow["5"]["inputs"]["height"]), (832, 1216))
+        self.assertEqual((workflow["23"]["inputs"]["width"],
+                          workflow["23"]["inputs"]["height"]), (1248, 1824))
+
+    def test_a_declared_scale_must_match_the_workflow(self) -> None:
+        """The scale duplicates a ratio the workflow already states, so it can
+        drift. Editing either side without the other has to fail here."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        workflow = cardgen.load_json(
+            cardgen.load_profile(app, "wai-hires")["workflow_path"]
+        )
+        for entries in (
+            [{"node_id": "5", "scale": 1}, {"node_id": "23", "scale": 2}],
+            [{"node_id": "5", "scale": 1}, {"node_id": "23", "scale": 1}],
+            # No scale 1 entry: nothing says what --width refers to.
+            [{"node_id": "5", "scale": 2}, {"node_id": "23", "scale": 3}],
+            [{"node_id": "5", "scale": 1}, {"node_id": "5", "scale": 1.5}],
+            [{"node_id": "5", "scale": 0}],
+            [{"node_id": "5", "scale": "1.5"}],
+        ):
+            with self.subTest(entries=entries):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolve_resolution_nodes(
+                        workflow, {"resolution_nodes": entries}
+                    )
+
+    def test_a_bare_node_id_still_means_scale_one(self) -> None:
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "flux2-klein-edit")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        entries = cardgen.resolution_entries({"resolution_nodes": ["62", "66"]})
+        self.assertEqual([e["scale"] for e in entries], [1.0, 1.0])
+        cardgen.apply_resolution(
+            workflow, 832, 1216, {"resolution_nodes": ["62", "66"]}
+        )
+        for node_id in ("62", "66"):
+            inputs = workflow[node_id]["inputs"]
+            self.assertEqual((inputs["width"], inputs["height"]), (832, 1216))
+
+    def test_every_written_resolution_must_stay_on_the_eight_grid(self) -> None:
+        """Not just latents. wai-hires node 23 is an ImageScale, but its output
+        feeds VAEEncode, so an off-grid value there is not free. Measured on
+        this machine: --width 840 --height 1224 wrote node 23 = 1260x1836, and
+        the saved PNG came out 1256x1832 -- ComfyUI cropped to the grid and the
+        run record kept the uncropped number. A record that misstates the output
+        size is worse than a refused run, so every written value must divide by
+        8 whatever the node kind."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        self.assertEqual(
+            cardgen.load_json(profile["workflow_path"])["23"]["class_type"],
+            "ImageScale",
+        )
+
+        # 840 * 1.5 = 1260, and 1260 % 8 == 4.
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(
+                cardgen.load_json(profile["workflow_path"]),
+                840,
+                1224,
+                profile["bindings"],
+            )
+        # 832 * 1.5 = 1248, which is on the grid.
+        workflow = cardgen.load_json(profile["workflow_path"])
+        cardgen.apply_resolution(workflow, 832, 1216, profile["bindings"])
+        self.assertEqual(workflow["23"]["inputs"]["width"], 1248)
+        self.assertEqual(workflow["23"]["inputs"]["width"] % 8, 0)
+
+        # The scale-1 nodes are safe by construction: --width is already forced
+        # to a multiple of 8. It is the scaled ones that need the check.
+        self.assertEqual(workflow["5"]["inputs"]["width"], 832)
+
+    def test_a_resolution_list_missing_a_non_latent_node_is_refused(self) -> None:
+        """The completeness guard cannot look at LATENT_TYPES only: the reason
+        this binding exists is that latents are not the only nodes stating a
+        resolution. wai-controlnet node 31 scales the scribble to match the base
+        latent and feeds ControlNetApplyAdvanced with crop 'center', so leaving
+        it behind re-crops the hint against a different aspect and moves the
+        composition, with nothing raised."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-controlnet")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        self.assertEqual(workflow["31"]["class_type"], "ImageScale")
+        self.assertNotIn(workflow["31"]["class_type"], cardgen.LATENT_TYPES)
+        self.assertEqual(workflow["31"]["inputs"]["crop"], "center")
+
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.resolve_resolution_nodes(
+                workflow,
+                {
+                    "resolution_nodes": [
+                        {"node_id": "5", "scale": 1},
+                        {"node_id": "23", "scale": 1.5},
+                    ]
+                },
+            )
+        # The shipped list covers all three and still resolves.
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(workflow, profile["bindings"]),
+            ["23", "31", "5"],
+        )
+
+    def test_a_repeated_resolution_node_is_still_allowed(self) -> None:
+        """Listing a node twice writes the same value twice and shows up twice
+        in the run record. That was looked at and left alone; the rewrite must
+        not quietly start rejecting or de-duplicating it."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        workflow = cardgen.load_json(
+            cardgen.load_profile(app, "flux2-klein-edit")["workflow_path"]
+        )
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(
+                workflow, {"resolution_nodes": ["62", "66", "62"]}
+            ),
+            ["62", "62", "66"],
+        )
+
+    def test_the_check_and_the_write_round_the_same_way(self) -> None:
+        """They used to disagree: resolve rounded, apply demanded exact float
+        integrality. A profile could pass validate and then be impossible to run
+        at its own workflow's base size, because 1360 * 1.4 is
+        1903.9999999999998 in binary floating point. One policy now: round, and
+        refuse only when the rounding covers a real fraction."""
+        workflow = {
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 1040, "height": 1360, "batch_size": 1},
+            },
+            "9": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 1456, "height": 1904, "crop": "disabled"},
+            },
+        }
+        bindings = {
+            "resolution_nodes": [
+                {"node_id": "5", "scale": 1},
+                {"node_id": "9", "scale": 1.4},
+            ]
+        }
+        self.assertEqual(
+            cardgen.resolve_resolution_nodes(copy.deepcopy(workflow), bindings),
+            ["5", "9"],
+        )
+        written = copy.deepcopy(workflow)
+        self.assertEqual(
+            cardgen.apply_resolution(written, 1040, 1360, bindings), ["5", "9"]
+        )
+        self.assertEqual(written["9"]["inputs"]["height"], 1904)
+
+        # A genuine fraction is still refused by both.
+        fractional = {
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+            },
+            "9": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 614, "height": 614, "crop": "disabled"},
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(
+                fractional,
+                832,
+                832,
+                {
+                    "resolution_nodes": [
+                        {"node_id": "5", "scale": 1},
+                        {"node_id": "9", "scale": 0.6},
+                    ]
+                },
+            )
+
+    def test_a_scaled_down_node_still_respects_the_floor(self) -> None:
+        """--width is floored at 64, but a scale below 1 writes something
+        smaller than the tool's own minimum without tripping that check."""
+        workflow = {
+            "23": {
+                "class_type": "ImageScale",
+                "inputs": {"width": 1024, "height": 1024, "crop": "disabled"},
+            },
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 512, "height": 512, "batch_size": 1},
+            },
+        }
+        bindings = {
+            "resolution_nodes": [
+                {"node_id": "23", "scale": 1},
+                {"node_id": "5", "scale": 0.5},
+            ]
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(copy.deepcopy(workflow), 64, 64, bindings)
+        # 128 * 0.5 = 64, exactly the floor, and on the grid.
+        written = copy.deepcopy(workflow)
+        cardgen.apply_resolution(written, 128, 128, bindings)
+        self.assertEqual(written["5"]["inputs"]["width"], 64)
+
+    def test_an_unknown_key_in_a_resolution_entry_is_refused(self) -> None:
+        """A misspelt scale silently defaults to 1 and moves the node by the
+        wrong amount -- the same cost check_binding_keys was added to avoid."""
+        for entry in ({"node_id": "5", "factor": 1}, {"node_id": "5", "scale_by": 1.5}):
+            with self.subTest(entry=entry):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries({"resolution_nodes": [entry]})
+        # A list of known keys still parses. It needs a scale-1 entry, since
+        # that is what --width refers to.
+        self.assertEqual(
+            cardgen.resolution_entries(
+                {
+                    "resolution_nodes": [
+                        {"node_id": "5", "scale": 1},
+                        {"node_id": "9", "scale": 2},
+                    ]
+                }
+            ),
+            [{"node_id": "5", "scale": 1.0}, {"node_id": "9", "scale": 2.0}],
+        )
+
+    def test_a_boolean_is_not_a_resolution(self) -> None:
+        """isinstance(True, int) is True, so the integer check let a hand-edited
+        workflow through."""
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.resolve_resolution_nodes(
+                {
+                    "5": {
+                        "class_type": "EmptyLatentImage",
+                        "inputs": {"width": True, "height": True, "batch_size": 1},
+                    }
+                },
+                {"resolution_nodes": ["5"]},
+            )
+        self.assertFalse(cardgen.positive_int(True))
+        self.assertFalse(cardgen.positive_int(0))
+        self.assertTrue(cardgen.positive_int(64))
+
+    def test_the_fallback_scan_refuses_a_graph_it_cannot_cover(self) -> None:
+        """The completeness rule used to apply only to profiles that already had
+        resolution_nodes, so deleting that one line from wai-hires.json restored
+        the original defect -- --width writing the latent only, output unchanged
+        -- with nothing raised. The scan knows just empty latents, so it has to
+        refuse a graph that states the size elsewhere."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        for profile_id in ("wai-hires", "wai-controlnet"):
+            with self.subTest(profile=profile_id):
+                profile = cardgen.load_profile(app, profile_id)
+                without = {
+                    key: value
+                    for key, value in profile["bindings"].items()
+                    if key != "resolution_nodes"
+                }
+                workflow = cardgen.load_json(profile["workflow_path"])
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_resolution(workflow, 832, 1216, without)
+                # Nothing was written before the refusal.
+                self.assertEqual(workflow["5"]["inputs"]["width"], 1024)
+
+        # Profiles whose graph states the size only in a latent still scan.
+        for profile_id in ("wai-single", "wai-hires-latent", "zimage"):
+            with self.subTest(profile=profile_id):
+                profile = cardgen.load_profile(app, profile_id)
+                workflow = cardgen.load_json(profile["workflow_path"])
+                self.assertTrue(
+                    cardgen.apply_resolution(
+                        workflow, 832, 1216, profile.get("bindings")
+                    )
+                )
+
+    def test_validate_refuses_a_workflow_whose_own_size_is_off_grid(self) -> None:
+        """A run without --width queues the workflow untouched, so its stated
+        resolutions must satisfy the same rule as the values we write. Otherwise
+        ComfyUI crops on every such run and the record keeps the uncropped
+        number -- measured on this machine at --width 840."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        # Discovery must not filter on validity: 0, -8, True and "1024" would
+        # drop the node out of the list entirely, and the check that exists to
+        # reject them would never see it.
+        for width, height in (
+            (1004, 1024),
+            (40, 64),
+            (0, 1024),
+            (-8, 1024),
+            (True, 1024),
+            ("1024", 1024),
+        ):
+            with self.subTest(size=(width, height)):
+                profile = cardgen.load_profile(app, "wai-single")
+                broken = cardgen.load_json(profile["workflow_path"])
+                broken["5"]["inputs"]["width"] = width
+                broken["5"]["inputs"]["height"] = height
+                self.assertIn("5", cardgen.resolution_bearing_nodes(broken))
+                with unittest.mock.patch.object(
+                    cardgen, "load_json", return_value=broken
+                ):
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.validate_profile_workflow(profile)
+
+    def test_a_scale_that_is_not_a_number_is_refused(self) -> None:
+        """float() would swallow "1.5" and True. The other entry rules do not
+        cover this one: a bad scale sitting next to a valid scale-1 entry still
+        satisfies "there is a scale-1 node"."""
+        for bad in ("1.5", True, None, [1.5]):
+            with self.subTest(scale=bad):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries(
+                        {
+                            "resolution_nodes": [
+                                {"node_id": "5", "scale": 1},
+                                {"node_id": "23", "scale": bad},
+                            ]
+                        }
+                    )
+
+    def test_a_non_finite_scale_is_a_cardgen_error(self) -> None:
+        """json.load accepts NaN and Infinity, and NaN <= 0 is False, so without
+        an isfinite test the value reaches round() and raises something main()
+        does not catch -- the user sees a traceback instead of a message."""
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(scale=bad):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries(
+                        {
+                            "resolution_nodes": [
+                                {"node_id": "5", "scale": 1},
+                                {"node_id": "23", "scale": bad},
+                            ]
+                        }
+                    )
+
+    def test_a_refused_resolution_leaves_every_node_untouched(self) -> None:
+        """The values are worked out before any is written. A refusal partway
+        through would leave some nodes moved and others not, which is the
+        half-applied graph the link guards refuse to create."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        # 840 is a legal --width, but 840 * 1.5 = 1260 is off the 8 grid.
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(workflow, 840, 1224, profile["bindings"])
+        self.assertEqual(workflow["5"]["inputs"]["width"], 1024)
+        self.assertEqual(workflow["23"]["inputs"]["width"], 1536)
 
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.
@@ -362,7 +730,7 @@ class CardGenTests(unittest.TestCase):
             "inputs": {"width": ["66", 0], "height": 1216},
         }
         with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_latent_size(
+            cardgen.apply_resolution(
                 workflow, 832, 1216, {"resolution_nodes": ["66", "901"]}
             )
         self.assertEqual(workflow["901"]["inputs"]["width"], ["66", 0])
@@ -401,23 +769,48 @@ class CardGenTests(unittest.TestCase):
                 with self.assertRaises(cardgen.CardGenError):
                     cardgen.validate_profile_workflow(profile)
 
-    def test_a_null_binding_means_the_same_thing_to_validate_and_generate(
-        self,
-    ) -> None:
+    def test_a_null_binding_is_refused_when_the_profile_loads(self) -> None:
+        """null and absent read alike at every use site, so a null binding drops
+        the option without a word: seed swallows --seed, and null prompt
+        bindings make --prompt required and then discard it while the metadata
+        still records what the user typed. Catch it where the profile is read."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        real = json.loads(
+            (ROOT / "config" / "profiles" / "flux2-klein-edit.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        # Go through load_profile, not the checker: a check nothing calls is
+        # worth nothing, and testing the function alone would not notice.
+        for key in ("seed", "positive_prompt", "denoise", "steps",
+                    "input_image", "resolution_nodes"):
+            with self.subTest(key=key):
+                broken = copy.deepcopy(real)
+                broken["bindings"][key] = None
+                with unittest.mock.patch.object(
+                    cardgen, "load_json", return_value=broken
+                ):
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.load_profile(app, "flux2-klein-edit")
+
+        with unittest.mock.patch.object(
+            cardgen, "load_json", return_value=copy.deepcopy(real)
+        ):
+            cardgen.load_profile(app, "flux2-klein-edit")
+        for profile_id in ("flux2-klein-edit", "wai-hires", "esrgan-upscale"):
+            cardgen.load_profile(app, profile_id)
+
+    def test_a_null_seed_binding_would_have_swallowed_the_seed(self) -> None:
+        """The consequence the load-time check exists to prevent. Kept as the
+        record of why null cannot mean "unbound": the runtime cannot tell."""
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
         profile = cardgen.load_profile(app, "flux2-klein-edit")
-        profile["bindings"] = dict(profile["bindings"])
-        profile["bindings"]["steps"] = None
-
-        summary = cardgen.validate_profile_workflow(profile)
-        self.assertNotIn("steps", summary["sampler_nodes"])
-        # generate falls back to the blanket path, which has nowhere to land on
-        # this graph. Both sides read the absence; only the run refuses.
         workflow = cardgen.load_json(profile["workflow_path"])
-        with self.assertRaises(cardgen.CardGenError):
-            cardgen.apply_sampler_params(
-                workflow, {"steps": 40}, profile["bindings"]
-            )
+        bindings = dict(profile["bindings"])
+        bindings["seed"] = None
+        self.assertEqual(cardgen.set_bound_seed(workflow, bindings, 1000), (None, None))
+        self.assertEqual(workflow["73"]["inputs"]["noise_seed"], 0)
 
     def test_a_binding_that_names_a_link_is_refused(self) -> None:
         """Settings and links share one inputs dict, so a slip is writable."""
@@ -505,8 +898,52 @@ class CardGenTests(unittest.TestCase):
 
         overrides = meta["setting_overrides"]
         self.assertNotIn("latent_nodes", overrides)
-        self.assertEqual(overrides["resolution_nodes"], ["5"])
+        self.assertEqual(overrides["resolution_nodes"], ["23", "5"])
         self.assertEqual(meta["schema_version"], 7)
+
+    def test_the_scan_paths_refuse_to_write_over_an_edge(self) -> None:
+        """bound_node has refused this since it was written; the scan paths that
+        run when a profile names nothing had the same hazard and no guard.
+        Overwriting an edge deletes it and the graph silently means something
+        else, so neither path may write a setting over one."""
+        sampler = {
+            "1": {"class_type": "Elsewhere", "inputs": {}},
+            "9": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "steps": ["1", 0],
+                    "cfg": 6.0,
+                    "sampler_name": "euler",
+                    "scheduler": "normal",
+                    "denoise": 1.0,
+                    "seed": 1,
+                },
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_sampler_params(sampler, {"steps": 40}, None)
+        self.assertEqual(sampler["9"]["inputs"]["steps"], ["1", 0])
+        # A field that is a literal on the same node is still writable.
+        self.assertEqual(
+            cardgen.apply_sampler_params(sampler, {"cfg": 3.5}, None), {"cfg": ["9"]}
+        )
+
+        latent = {
+            "1": {"class_type": "Elsewhere", "inputs": {}},
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": ["1", 0], "height": 1344, "batch_size": 1},
+            },
+        }
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(latent, 832, 1216)
+        self.assertEqual(latent["5"]["inputs"]["width"], ["1", 0])
+
+    def test_is_link_separates_a_setting_from_an_edge(self) -> None:
+        self.assertTrue(cardgen.is_link(["12", 0]))
+        self.assertTrue(cardgen.is_link({"node": "12"}))
+        for setting in (28, 6.0, "euler", "", True, None):
+            self.assertFalse(cardgen.is_link(setting))
 
     def test_an_unbound_sampler_param_still_moves_every_sampler(self) -> None:
         app = cardgen.load_app_config(ROOT / "config" / "app.json")

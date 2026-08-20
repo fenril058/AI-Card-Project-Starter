@@ -16,6 +16,7 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -34,6 +35,11 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_APP_CONFIG = PROJECT_DIR / "config" / "app.json"
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 APP_CONFIG_SCHEMA_VERSION = 3
+# Exact-match, and deliberately not bumped when bindings.resolution_nodes gained
+# the {node_id, scale} form. The number gates this repo's own loader against its
+# own profiles, not a published format: an older cardgen meeting a newer profile
+# refuses it outright (it required every element to be a string) rather than
+# running it wrong, so there is nothing for a version to protect against here.
 PROFILE_SCHEMA_VERSION = 4
 SAMPLER_TYPES = {"KSampler", "KSamplerAdvanced", "SamplerCustomAdvanced"}
 LATENT_TYPES = {
@@ -423,6 +429,33 @@ def normalize_approved_models(profile: dict[str, Any]) -> dict[str, set[str]]:
     return result
 
 
+def is_link(value: Any) -> bool:
+    """True when a node input carries an edge rather than a setting.
+
+    ComfyUI's API format puts both in one inputs dict; an edge is [node_id, slot].
+    Writing a setting over one deletes the edge and silently changes the graph,
+    so every write path has to ask this before it writes.
+    """
+    return isinstance(value, (list, dict))
+
+
+def check_binding_values(bindings: dict[str, Any]) -> None:
+    """Refuse a binding key whose value is null.
+
+    Absent and null read the same at every use site, so a null lands as "no
+    binding" and the option it names is dropped without a word: bindings.seed
+    null swallows --seed, and null prompt bindings make --prompt required and
+    then discard it while the metadata still records what the user typed.
+    """
+    empty = sorted(key for key, value in bindings.items() if value is None)
+    if empty:
+        raise CardGenError(
+            f"bindingsの値がnullです: {'、'.join(empty)}。"
+            "nullは指名の省略とは違い、そのオプションが黙って捨てられます。"
+            "指名しないならキーごと消してください。"
+        )
+
+
 def check_binding_keys(bindings: dict[str, Any]) -> None:
     """Refuse a bindings key nothing reads, so a typo is not a silent no-op."""
     unknown = sorted(set(bindings) - BINDING_KEYS)
@@ -508,6 +541,7 @@ def load_profile(app: dict[str, Any], requested_id: str | None) -> dict[str, Any
         raise CardGenError("bindingsはオブジェクトで指定してください。")
     if isinstance(bindings, dict):
         check_binding_keys(bindings)
+        check_binding_values(bindings)
         check_sampler_binding_fields(bindings)
 
     return profile
@@ -714,7 +748,7 @@ def bound_node(
     inputs = node.get("inputs")
     if not isinstance(inputs, dict) or field not in inputs:
         raise CardGenError(f"bindings.{label}の入力がありません: node {node_id}")
-    if isinstance(inputs[field], (list, dict)):
+    if is_link(inputs[field]):
         # 他ノードからの接続。設定と接続は同じinputsに並んでいるので、隣を指した
         # bindingは書き込めてしまう。上書きすると辺が消え、グラフの意味が変わる。
         raise CardGenError(
@@ -727,7 +761,11 @@ def bound_node(
 def resolve_bound_node(
     workflow: dict[str, Any], bindings: dict[str, Any], label: str
 ) -> tuple[str, dict[str, Any], str]:
-    """Guard and resolve one binding without writing it. validate's entry point."""
+    """Guard and resolve one binding without writing it.
+
+    Both sides go through here: validate stops at the resolution, and
+    set_bound_value writes into what this returns.
+    """
     binding = bindings.get(label)
     if not isinstance(binding, dict):
         raise CardGenError(f"bindings.{label}が不正です。")
@@ -904,6 +942,116 @@ def apply_checkpoint_override(
     return sorted(changed)
 
 
+def positive_int(value: Any) -> bool:
+    """int, and not a bool. isinstance(True, int) is True in Python."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def scaled_size(value: int, scale: float, label: str) -> int:
+    """Apply a scale under one rounding policy.
+
+    resolve and apply used to disagree: the check rounded, the write demanded
+    exact float integrality, so a profile could pass validate and be impossible
+    to run at its own workflow's base size. Float products are not exact either
+    (1360 * 1.4 == 1903.9999999999998), so a bare == test rejects products that
+    are integers in arithmetic. Round, then require the rounding to be a
+    correction of float error rather than a real fraction.
+    """
+    exact = value * scale
+    result = round(exact)
+    if abs(exact - result) > 1e-6:
+        raise CardGenError(
+            f"scale {scale:g} を掛けると整数になりません: {label} "
+            f"({value} -> {exact:g})"
+        )
+    return result
+
+
+def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] | None:
+    """Normalise bindings.resolution_nodes into {node_id, scale} entries.
+
+    A bare node id means scale 1. A graph may state the size more than once at
+    different sizes: wai-hires keeps the base in EmptyLatentImage and the hires
+    target in ImageScale at 1.5x, so one value written everywhere is wrong.
+    """
+    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
+    if binding is None:
+        return None
+    if not isinstance(binding, list) or not binding:
+        raise CardGenError(
+            "bindings.resolution_nodesは空でない配列で指定してください。"
+        )
+
+    entries: list[dict[str, Any]] = []
+    for item in binding:
+        if isinstance(item, str) and item:
+            entries.append({"node_id": item, "scale": 1.0})
+            continue
+        if not isinstance(item, dict):
+            raise CardGenError(
+                "bindings.resolution_nodesの要素はnode_id文字列か"
+                "{node_id, scale}オブジェクトです。"
+            )
+        unknown = sorted(set(item) - {"node_id", "scale"})
+        if unknown:
+            # check_binding_keys refuses an unknown key one screen up; a typo
+            # here silently defaults scale to 1 and moves the node by the wrong
+            # amount, which is the same cost that check argues against.
+            raise CardGenError(
+                "bindings.resolution_nodesの要素に未知のキーがあります: "
+                f"{'、'.join(unknown)}。使えるのはnode_idとscaleです。"
+            )
+        node_id = item.get("node_id")
+        scale = item.get("scale", 1.0)
+        if not isinstance(node_id, str) or not node_id:
+            raise CardGenError("bindings.resolution_nodesのnode_idが不正です。")
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, (int, float))
+            or not math.isfinite(scale)
+            or scale <= 0
+        ):
+            # json.load accepts NaN and Infinity. NaN <= 0 is False, so without
+            # isfinite it reaches round() and raises ValueError/OverflowError,
+            # which main() does not catch and the user sees as a traceback.
+            raise CardGenError(
+                f"bindings.resolution_nodesのscaleは正の有限数です: node {node_id}"
+            )
+        entries.append({"node_id": node_id, "scale": float(scale)})
+
+    # 同じノードを2回挙げること自体は許す。同じ値を2回書くだけで害が無く、記録に
+    # 2回載る以上のことは起きない。倍率が食い違う場合は、下のワークフロー照合が
+    # 必ず落とす(base*s1 == base*s2 は base が0のときしか成り立たない)ので、
+    # ここに専用の検査は置かない。
+    if not any(e["scale"] == 1.0 for e in entries):
+        raise CardGenError(
+            "bindings.resolution_nodesにscale 1のノードがありません。"
+            "--widthが指す基準の解像度を持つノードをscale 1で挙げてください。"
+        )
+    return entries
+
+
+def resolution_bearing_nodes(workflow: dict[str, Any]) -> list[str]:
+    """Node ids that state a width and a height, whether or not the values are sane.
+
+    Discovery must not filter on validity. Asking for positive ints here would
+    make width 0, -8, True or "1024" drop out of the list, and the caller that
+    exists to reject exactly those values would never see the node: the profile
+    would pass validate with a resolution the run cannot honour.
+
+    Not restricted to LATENT_TYPES either: the reason bindings.resolution_nodes
+    exists is that a latent is not the only node stating the output size.
+    """
+    return sorted(
+        node_id
+        for node_id, node in workflow.items()
+        if isinstance(node, dict)
+        and isinstance(node.get("inputs"), dict)
+        and "width" in node["inputs"]
+        and "height" in node["inputs"]
+    )
+
+
 def resolve_resolution_nodes(
     workflow: dict[str, Any], bindings: dict[str, Any] | None
 ) -> list[str] | None:
@@ -912,19 +1060,13 @@ def resolve_resolution_nodes(
     Returns None when the profile lists none, which leaves the empty-latent scan
     in charge. Resolving without writing lets validate catch a stale node_id.
     """
-    binding = bindings.get("resolution_nodes") if isinstance(bindings, dict) else None
-    if binding is None:
+    entries = resolution_entries(bindings)
+    if entries is None:
         return None
-    if (
-        not isinstance(binding, list)
-        or not binding
-        or not all(isinstance(node_id, str) and node_id for node_id in binding)
-    ):
-        raise CardGenError(
-            "bindings.resolution_nodesは空でない文字列の配列で指定してください。"
-        )
 
-    for node_id in binding:
+    sizes: dict[str, tuple[int, int]] = {}
+    for entry in entries:
+        node_id = entry["node_id"]
         node = workflow.get(node_id)
         inputs = node.get("inputs") if isinstance(node, dict) else None
         if not isinstance(inputs, dict):
@@ -940,40 +1082,64 @@ def resolve_resolution_nodes(
         # bound_nodeと同じ理由。この経路だけがbound_nodeを通らないので、接続を
         # 指した列挙が素通りしていた。上書きすると辺が消え、グラフの意味が変わる。
         linked = [
-            field
-            for field in ("width", "height")
-            if isinstance(inputs[field], (list, dict))
+            field for field in ("width", "height") if is_link(inputs[field])
         ]
         if linked:
             raise CardGenError(
                 "bindings.resolution_nodesが指しているのは設定ではなく"
                 f"他ノードからの接続です: node {node_id} {'と'.join(linked)}"
             )
+        if not all(positive_int(inputs[f]) for f in ("width", "height")):
+            raise CardGenError(
+                f"bindings.resolution_nodesのwidth/heightが正の整数ではありません: "
+                f"node {node_id}"
+            )
+        sizes[node_id] = (inputs["width"], inputs["height"])
 
     # 列挙を書くと空Latent走査は行われない。取りこぼすと、出力サイズは既定のまま
     # 列挙した側だけが動く。この列挙が防ぐはずの食い違いが、逆向きに、しかも
     # エラーを出さずに起きる。
-    uncovered = sorted(
-        node_id
-        for node_id, node in workflow.items()
-        if isinstance(node, dict)
-        and node.get("class_type") in LATENT_TYPES
-        and isinstance(node.get("inputs"), dict)
-        and "width" in node["inputs"]
-        and "height" in node["inputs"]
-        and str(node_id) not in binding
-    )
+    listed = {e["node_id"] for e in entries}
+    # LATENT_TYPES に限ってはいけない。このbindingが存在する理由が「解像度を述べる
+    # のはLatentだけではない」ことなので、取りこぼしの検査も同じ範囲を見る必要が
+    # ある。wai-controlnet の node 31 (ImageScale) を落とすと、ラフ線画だけが元の
+    # 寸法のまま中央クロップされ、構図が変わる。
+    uncovered = [n for n in resolution_bearing_nodes(workflow) if n not in listed]
     if uncovered:
         raise CardGenError(
-            "bindings.resolution_nodesが空Latentノードを列挙していません: "
+            "bindings.resolution_nodesが解像度を述べるノードを列挙していません: "
             f"node {'、'.join(uncovered)}。"
-            "列挙を書くと空Latentの走査は行われないので、解像度を述べている"
-            "ノードをすべて挙げてください。"
+            "列挙を書くと走査は行われないので、width/heightを持つノードを"
+            "すべて挙げてください。"
         )
-    return sorted(binding)
+
+    # 宣言した倍率がワークフローの現在値と合っているかを見る。合っていなければ、
+    # ワークフローを編集して比率が変わったか、倍率の書き間違いのどちらか。
+    bases = {sizes[e["node_id"]] for e in entries if e["scale"] == 1.0}
+    if len(bases) != 1:
+        raise CardGenError(
+            "bindings.resolution_nodesのscale 1のノードが同じ解像度では"
+            f"ありません: {sorted(bases)}"
+        )
+    base_w, base_h = bases.pop()
+    for entry in entries:
+        node_id, scale = entry["node_id"], entry["scale"]
+        want = (
+            scaled_size(base_w, scale, f"node {node_id} width"),
+            scaled_size(base_h, scale, f"node {node_id} height"),
+        )
+        if sizes[node_id] != want:
+            raise CardGenError(
+                f"bindings.resolution_nodesのscaleがワークフローと一致しません: "
+                f"node {node_id} は {sizes[node_id][0]}x{sizes[node_id][1]} だが、"
+                f"scale {scale:g} なら {want[0]}x{want[1]} のはずです。"
+            )
+    # 重複は残したまま返す。同じノードを2回挙げるのは無害で、記録に2回載るだけ。
+    # 黙って畳むと、書いた通りに記録されなくなる。
+    return sorted(e["node_id"] for e in entries)
 
 
-def apply_latent_size(
+def apply_resolution(
     workflow: dict[str, Any],
     width: int,
     height: int,
@@ -994,11 +1160,57 @@ def apply_latent_size(
 
     listed = resolve_resolution_nodes(workflow, bindings)
     if listed is not None:
-        for node_id in listed:
-            inputs = workflow[node_id]["inputs"]
-            inputs["width"] = width
-            inputs["height"] = height
+        entries = resolution_entries(bindings) or []
+        # Work every value out before writing any of them. A refusal partway
+        # through would leave some nodes moved and others not, which is the
+        # half-applied graph the link guards elsewhere refuse to create.
+        planned: list[tuple[str, int, int]] = []
+        for entry in entries:
+            node_id, scale = entry["node_id"], entry["scale"]
+            scaled_w = scaled_size(width, scale, f"node {node_id} width")
+            scaled_h = scaled_size(height, scale, f"node {node_id} height")
+            if scaled_w < 64 or scaled_h < 64:
+                # The floor is checked on --width above, but a scale below 1
+                # writes something smaller than the tool's own minimum.
+                raise CardGenError(
+                    f"解像度が64未満になります: node {node_id} "
+                    f"({scaled_w}x{scaled_h})。scale {scale:g} が掛かります。"
+                )
+            if scaled_w % 8 or scaled_h % 8:
+                # ノード種別では分けられない。ピクセル空間の ImageScale でも、
+                # 出力が VAEEncode へ入るなら8の倍数が要る。wai-hires の node 23 が
+                # それで、--width 840 は node 23 を 1260x1836 にする。ComfyUI は
+                # これを 1256x1832 へ黙ってクロップし、記録だけが 1260x1836 のまま
+                # 残る。実測で確認した。記録が出力寸法について嘘をつくので、
+                # 書き込む値はすべて8の倍数であることを要求する。
+                raise CardGenError(
+                    f"解像度が8の倍数になりません: node {node_id} "
+                    f"({scaled_w}x{scaled_h})。scale {scale:g} を掛けても8の倍数に"
+                    f"なる--widthと--heightを選んでください。"
+                )
+            planned.append((node_id, scaled_w, scaled_h))
+
+        for node_id, scaled_w, scaled_h in planned:
+            workflow[node_id]["inputs"]["width"] = scaled_w
+            workflow[node_id]["inputs"]["height"] = scaled_h
         return listed
+
+    # The scan only knows empty latents. A graph that states the resolution
+    # somewhere else needs the profile to say so: writing the latent alone leaves
+    # the output unchanged, which is the defect resolution_nodes exists to stop.
+    # Without this, deleting that one binding silently restores the old bug and
+    # validate still reports success.
+    unlisted = [
+        node_id
+        for node_id in resolution_bearing_nodes(workflow)
+        if workflow[node_id].get("class_type") not in LATENT_TYPES
+    ]
+    if unlisted:
+        raise CardGenError(
+            "空Latent以外にも解像度を述べるノードがあります: "
+            f"node {'、'.join(unlisted)}。空Latentだけ書き換えても出力寸法が"
+            "変わらないので、bindings.resolution_nodesで倍率つきに列挙してください。"
+        )
 
     changed: list[str] = []
     for node_id, node in workflow.items():
@@ -1006,6 +1218,15 @@ def apply_latent_size(
             continue
         inputs = node.get("inputs")
         if isinstance(inputs, dict) and "width" in inputs and "height" in inputs:
+            linked = [f for f in ("width", "height") if is_link(inputs[f])]
+            if linked:
+                # The size is computed elsewhere in the graph. Writing here would
+                # drop that edge, so say so rather than quietly rewiring.
+                raise CardGenError(
+                    f"空Latentの{'と'.join(linked)}が他ノードからの接続です: "
+                    f"node {node_id}。--widthで上書きすると辺が消えます。"
+                    "解像度を持つノードをbindings.resolution_nodesで指名してください。"
+                )
             inputs["width"] = width
             inputs["height"] = height
             changed.append(str(node_id))
@@ -1026,7 +1247,7 @@ def literal_field_nodes(workflow: dict[str, Any], field: str) -> list[str]:
         inputs = node.get("inputs")
         if not isinstance(inputs, dict) or field not in inputs:
             continue
-        if isinstance(inputs[field], (list, dict)):
+        if is_link(inputs[field]):
             continue
         found.append(str(node_id))
     return sorted(found)
@@ -1066,9 +1287,19 @@ def apply_sampler_params(
         nodes: list[str] = []
         for node_id, node in sampler_nodes(workflow):
             inputs = node.get("inputs")
-            if isinstance(inputs, dict) and field in inputs:
-                inputs[field] = value
-                nodes.append(node_id)
+            if not isinstance(inputs, dict) or field not in inputs:
+                continue
+            if is_link(inputs[field]):
+                # Another node supplies this value. Overwriting it deletes the
+                # edge, and skipping it would apply the option to some samplers
+                # and not others without saying which.
+                raise CardGenError(
+                    f"{sampler_param_option(field)}の書き込み先が他ノードからの"
+                    f"接続です: node {node_id} {field}。上書きすると辺が消えます。"
+                    f"プロファイルへbindings.{field}を書いて指名してください。"
+                )
+            inputs[field] = value
+            nodes.append(node_id)
 
         if not nodes:
             # bindingを勧めてよいのは、そのフィールドを持つノードが実際にある
@@ -1168,7 +1399,7 @@ def snapshot_node_inputs(workflow: dict[str, Any]) -> dict[str, Any]:
         literals = {
             field: value
             for field, value in sorted(inputs.items())
-            if not isinstance(value, (list, dict)) and field not in withheld
+            if not is_link(value) and field not in withheld
         }
         if literals:
             snapshot[str(node_id)] = {
@@ -1261,6 +1492,25 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             f"expected={expected_multi_pass}, detected={multi_pass_detected}"
         )
 
+    # A run without --width queues the workflow untouched, so its own stated
+    # resolutions have to satisfy the same rule apply_resolution enforces on the
+    # values it writes. Otherwise ComfyUI crops on every such run and the record
+    # keeps the uncropped number, which is the failure this branch set out to fix.
+    for node_id in resolution_bearing_nodes(probe):
+        inputs = probe[node_id]["inputs"]
+        bad = [
+            f"{field}={inputs[field]!r}"
+            for field in ("width", "height")
+            if not positive_int(inputs[field])
+            or inputs[field] % 8
+            or inputs[field] < 64
+        ]
+        if bad:
+            raise CardGenError(
+                f"ワークフローの解像度が8の倍数かつ64以上ではありません: "
+                f"node {node_id} {'、'.join(bad)}"
+            )
+
     input_image_node: str | None = None
     denoise_node: str | None = None
     sampler_param_nodes: dict[str, list[str]] = {}
@@ -1271,9 +1521,9 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         # a run that has already uploaded an image and queued work.
         resolution_nodes = resolve_resolution_nodes(probe, bindings) or []
         for field in SAMPLER_OVERRIDE_FIELDS:
-            # generate reads a null binding as "no binding" and falls back to
-            # the blanket path. validate has to read it the same way, or it
-            # refuses a profile the run would have accepted.
+            # An absent binding means the blanket path handles the field.
+            # A null one cannot reach here: load_profile refuses it, because
+            # null and absent read alike and the option would vanish silently.
             if bindings.get(field) is None:
                 continue
             # Resolve only. validate has no value to write, and the node need
@@ -1521,7 +1771,7 @@ def command_generate(
     if args.width is not None or args.height is not None:
         if args.width is None or args.height is None:
             raise CardGenError("--widthと--heightは同時に指定してください。")
-        resolution_nodes = apply_latent_size(
+        resolution_nodes = apply_resolution(
             workflow,
             args.width,
             args.height,
@@ -1787,10 +2037,10 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--seed", type=int)
     generate.add_argument("--timeout", type=int)
     generate.add_argument(
-        "--width", type=int, help="出力幅（8の倍数、--heightと同時指定）"
+        "--width", type=int, help="基準解像度の幅（8の倍数、--heightと同時指定）"
     )
     generate.add_argument(
-        "--height", type=int, help="出力高さ（8の倍数、--widthと同時指定）"
+        "--height", type=int, help="基準解像度の高さ（8の倍数、--widthと同時指定）"
     )
     generate.add_argument("--steps", type=int, help="サンプリングステップ数")
     generate.add_argument("--cfg", type=float, help="CFG scale")
