@@ -1017,6 +1017,23 @@ def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] 
     return entries
 
 
+def resolution_bearing_nodes(workflow: dict[str, Any]) -> list[str]:
+    """Node ids stating a width and a height as positive int literals.
+
+    Not restricted to LATENT_TYPES on purpose: the whole reason
+    bindings.resolution_nodes exists is that a latent is not the only node that
+    can state the output size. wai-hires keeps the hires target in an ImageScale.
+    """
+    return sorted(
+        node_id
+        for node_id, node in workflow.items()
+        if isinstance(node, dict)
+        and isinstance(node.get("inputs"), dict)
+        and positive_int(node["inputs"].get("width"))
+        and positive_int(node["inputs"].get("height"))
+    )
+
+
 def resolve_resolution_nodes(
     workflow: dict[str, Any], bindings: dict[str, Any] | None
 ) -> list[str] | None:
@@ -1069,17 +1086,7 @@ def resolve_resolution_nodes(
     # のはLatentだけではない」ことなので、取りこぼしの検査も同じ範囲を見る必要が
     # ある。wai-controlnet の node 31 (ImageScale) を落とすと、ラフ線画だけが元の
     # 寸法のまま中央クロップされ、構図が変わる。
-    uncovered = sorted(
-        node_id
-        for node_id, node in workflow.items()
-        if isinstance(node, dict)
-        and isinstance(node.get("inputs"), dict)
-        and isinstance(node["inputs"].get("width"), int)
-        and not isinstance(node["inputs"].get("width"), bool)
-        and isinstance(node["inputs"].get("height"), int)
-        and not isinstance(node["inputs"].get("height"), bool)
-        and str(node_id) not in listed
-    )
+    uncovered = [n for n in resolution_bearing_nodes(workflow) if n not in listed]
     if uncovered:
         raise CardGenError(
             "bindings.resolution_nodesが解像度を述べるノードを列挙していません: "
@@ -1163,6 +1170,23 @@ def apply_resolution(
             node["inputs"]["width"] = scaled_w
             node["inputs"]["height"] = scaled_h
         return listed
+
+    # The scan only knows empty latents. A graph that states the resolution
+    # somewhere else needs the profile to say so: writing the latent alone leaves
+    # the output unchanged, which is the defect resolution_nodes exists to stop.
+    # Without this, deleting that one binding silently restores the old bug and
+    # validate still reports success.
+    unlisted = [
+        node_id
+        for node_id in resolution_bearing_nodes(workflow)
+        if workflow[node_id].get("class_type") not in LATENT_TYPES
+    ]
+    if unlisted:
+        raise CardGenError(
+            "空Latent以外にも解像度を述べるノードがあります: "
+            f"node {'、'.join(unlisted)}。空Latentだけ書き換えても出力寸法が"
+            "変わらないので、bindings.resolution_nodesで倍率つきに列挙してください。"
+        )
 
     changed: list[str] = []
     for node_id, node in workflow.items():
@@ -1443,6 +1467,23 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             "プロファイルのmulti_pass指定とSampler数が一致しません: "
             f"expected={expected_multi_pass}, detected={multi_pass_detected}"
         )
+
+    # A run without --width queues the workflow untouched, so its own stated
+    # resolutions have to satisfy the same rule apply_resolution enforces on the
+    # values it writes. Otherwise ComfyUI crops on every such run and the record
+    # keeps the uncropped number, which is the failure this branch set out to fix.
+    for node_id in resolution_bearing_nodes(probe):
+        inputs = probe[node_id]["inputs"]
+        bad = [
+            f"{field}={inputs[field]}"
+            for field in ("width", "height")
+            if inputs[field] % 8 or inputs[field] < 64
+        ]
+        if bad:
+            raise CardGenError(
+                f"ワークフローの解像度が8の倍数かつ64以上ではありません: "
+                f"node {node_id} {'、'.join(bad)}"
+            )
 
     input_image_node: str | None = None
     denoise_node: str | None = None

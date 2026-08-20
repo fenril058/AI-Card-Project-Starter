@@ -610,6 +610,72 @@ class CardGenTests(unittest.TestCase):
         self.assertFalse(cardgen.positive_int(0))
         self.assertTrue(cardgen.positive_int(64))
 
+    def test_the_fallback_scan_refuses_a_graph_it_cannot_cover(self) -> None:
+        """The completeness rule used to apply only to profiles that already had
+        resolution_nodes, so deleting that one line from wai-hires.json restored
+        the original defect -- --width writing the latent only, output unchanged
+        -- with nothing raised. The scan knows just empty latents, so it has to
+        refuse a graph that states the size elsewhere."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        for profile_id in ("wai-hires", "wai-controlnet"):
+            with self.subTest(profile=profile_id):
+                profile = cardgen.load_profile(app, profile_id)
+                without = {
+                    key: value
+                    for key, value in profile["bindings"].items()
+                    if key != "resolution_nodes"
+                }
+                workflow = cardgen.load_json(profile["workflow_path"])
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.apply_resolution(workflow, 832, 1216, without)
+                # Nothing was written before the refusal.
+                self.assertEqual(workflow["5"]["inputs"]["width"], 1024)
+
+        # Profiles whose graph states the size only in a latent still scan.
+        for profile_id in ("wai-single", "wai-hires-latent", "zimage"):
+            with self.subTest(profile=profile_id):
+                profile = cardgen.load_profile(app, profile_id)
+                workflow = cardgen.load_json(profile["workflow_path"])
+                self.assertTrue(
+                    cardgen.apply_resolution(
+                        workflow, 832, 1216, profile.get("bindings")
+                    )
+                )
+
+    def test_validate_refuses_a_workflow_whose_own_size_is_off_grid(self) -> None:
+        """A run without --width queues the workflow untouched, so its stated
+        resolutions must satisfy the same rule as the values we write. Otherwise
+        ComfyUI crops on every such run and the record keeps the uncropped
+        number -- measured on this machine at --width 840."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        for width, height in ((1004, 1024), (40, 64)):
+            with self.subTest(size=(width, height)):
+                profile = cardgen.load_profile(app, "wai-single")
+                broken = cardgen.load_json(profile["workflow_path"])
+                broken["5"]["inputs"]["width"] = width
+                broken["5"]["inputs"]["height"] = height
+                with unittest.mock.patch.object(
+                    cardgen, "load_json", return_value=broken
+                ):
+                    with self.assertRaises(cardgen.CardGenError):
+                        cardgen.validate_profile_workflow(profile)
+
+    def test_a_scale_that_is_not_a_number_is_refused(self) -> None:
+        """float() would swallow "1.5" and True. The other entry rules do not
+        cover this one: a bad scale sitting next to a valid scale-1 entry still
+        satisfies "there is a scale-1 node"."""
+        for bad in ("1.5", True, None, [1.5]):
+            with self.subTest(scale=bad):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries(
+                        {
+                            "resolution_nodes": [
+                                {"node_id": "5", "scale": 1},
+                                {"node_id": "23", "scale": bad},
+                            ]
+                        }
+                    )
+
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.
 
