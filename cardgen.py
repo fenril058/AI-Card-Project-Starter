@@ -16,6 +16,7 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -34,6 +35,11 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_APP_CONFIG = PROJECT_DIR / "config" / "app.json"
 PROFILE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 APP_CONFIG_SCHEMA_VERSION = 3
+# Exact-match, and deliberately not bumped when bindings.resolution_nodes gained
+# the {node_id, scale} form. The number gates this repo's own loader against its
+# own profiles, not a published format: an older cardgen meeting a newer profile
+# refuses it outright (it required every element to be a string) rather than
+# running it wrong, so there is nothing for a version to protect against here.
 PROFILE_SCHEMA_VERSION = 4
 SAMPLER_TYPES = {"KSampler", "KSamplerAdvanced", "SamplerCustomAdvanced"}
 LATENT_TYPES = {
@@ -999,9 +1005,17 @@ def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] 
         scale = item.get("scale", 1.0)
         if not isinstance(node_id, str) or not node_id:
             raise CardGenError("bindings.resolution_nodesのnode_idが不正です。")
-        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, (int, float))
+            or not math.isfinite(scale)
+            or scale <= 0
+        ):
+            # json.load accepts NaN and Infinity. NaN <= 0 is False, so without
+            # isfinite it reaches round() and raises ValueError/OverflowError,
+            # which main() does not catch and the user sees as a traceback.
             raise CardGenError(
-                f"bindings.resolution_nodesのscaleは正の数です: node {node_id}"
+                f"bindings.resolution_nodesのscaleは正の有限数です: node {node_id}"
             )
         entries.append({"node_id": node_id, "scale": float(scale)})
 
@@ -1018,19 +1032,23 @@ def resolution_entries(bindings: dict[str, Any] | None) -> list[dict[str, Any]] 
 
 
 def resolution_bearing_nodes(workflow: dict[str, Any]) -> list[str]:
-    """Node ids stating a width and a height as positive int literals.
+    """Node ids that state a width and a height, whether or not the values are sane.
 
-    Not restricted to LATENT_TYPES on purpose: the whole reason
-    bindings.resolution_nodes exists is that a latent is not the only node that
-    can state the output size. wai-hires keeps the hires target in an ImageScale.
+    Discovery must not filter on validity. Asking for positive ints here would
+    make width 0, -8, True or "1024" drop out of the list, and the caller that
+    exists to reject exactly those values would never see the node: the profile
+    would pass validate with a resolution the run cannot honour.
+
+    Not restricted to LATENT_TYPES either: the reason bindings.resolution_nodes
+    exists is that a latent is not the only node stating the output size.
     """
     return sorted(
         node_id
         for node_id, node in workflow.items()
         if isinstance(node, dict)
         and isinstance(node.get("inputs"), dict)
-        and positive_int(node["inputs"].get("width"))
-        and positive_int(node["inputs"].get("height"))
+        and "width" in node["inputs"]
+        and "height" in node["inputs"]
     )
 
 
@@ -1143,9 +1161,12 @@ def apply_resolution(
     listed = resolve_resolution_nodes(workflow, bindings)
     if listed is not None:
         entries = resolution_entries(bindings) or []
+        # Work every value out before writing any of them. A refusal partway
+        # through would leave some nodes moved and others not, which is the
+        # half-applied graph the link guards elsewhere refuse to create.
+        planned: list[tuple[str, int, int]] = []
         for entry in entries:
             node_id, scale = entry["node_id"], entry["scale"]
-            node = workflow[node_id]
             scaled_w = scaled_size(width, scale, f"node {node_id} width")
             scaled_h = scaled_size(height, scale, f"node {node_id} height")
             if scaled_w < 64 or scaled_h < 64:
@@ -1167,8 +1188,11 @@ def apply_resolution(
                     f"({scaled_w}x{scaled_h})。scale {scale:g} を掛けても8の倍数に"
                     f"なる--widthと--heightを選んでください。"
                 )
-            node["inputs"]["width"] = scaled_w
-            node["inputs"]["height"] = scaled_h
+            planned.append((node_id, scaled_w, scaled_h))
+
+        for node_id, scaled_w, scaled_h in planned:
+            workflow[node_id]["inputs"]["width"] = scaled_w
+            workflow[node_id]["inputs"]["height"] = scaled_h
         return listed
 
     # The scan only knows empty latents. A graph that states the resolution
@@ -1475,9 +1499,11 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
     for node_id in resolution_bearing_nodes(probe):
         inputs = probe[node_id]["inputs"]
         bad = [
-            f"{field}={inputs[field]}"
+            f"{field}={inputs[field]!r}"
             for field in ("width", "height")
-            if inputs[field] % 8 or inputs[field] < 64
+            if not positive_int(inputs[field])
+            or inputs[field] % 8
+            or inputs[field] < 64
         ]
         if bad:
             raise CardGenError(

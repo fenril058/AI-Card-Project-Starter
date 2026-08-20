@@ -648,12 +648,23 @@ class CardGenTests(unittest.TestCase):
         ComfyUI crops on every such run and the record keeps the uncropped
         number -- measured on this machine at --width 840."""
         app = cardgen.load_app_config(ROOT / "config" / "app.json")
-        for width, height in ((1004, 1024), (40, 64)):
+        # Discovery must not filter on validity: 0, -8, True and "1024" would
+        # drop the node out of the list entirely, and the check that exists to
+        # reject them would never see it.
+        for width, height in (
+            (1004, 1024),
+            (40, 64),
+            (0, 1024),
+            (-8, 1024),
+            (True, 1024),
+            ("1024", 1024),
+        ):
             with self.subTest(size=(width, height)):
                 profile = cardgen.load_profile(app, "wai-single")
                 broken = cardgen.load_json(profile["workflow_path"])
                 broken["5"]["inputs"]["width"] = width
                 broken["5"]["inputs"]["height"] = height
+                self.assertIn("5", cardgen.resolution_bearing_nodes(broken))
                 with unittest.mock.patch.object(
                     cardgen, "load_json", return_value=broken
                 ):
@@ -675,6 +686,35 @@ class CardGenTests(unittest.TestCase):
                             ]
                         }
                     )
+
+    def test_a_non_finite_scale_is_a_cardgen_error(self) -> None:
+        """json.load accepts NaN and Infinity, and NaN <= 0 is False, so without
+        an isfinite test the value reaches round() and raises something main()
+        does not catch -- the user sees a traceback instead of a message."""
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(scale=bad):
+                with self.assertRaises(cardgen.CardGenError):
+                    cardgen.resolution_entries(
+                        {
+                            "resolution_nodes": [
+                                {"node_id": "5", "scale": 1},
+                                {"node_id": "23", "scale": bad},
+                            ]
+                        }
+                    )
+
+    def test_a_refused_resolution_leaves_every_node_untouched(self) -> None:
+        """The values are worked out before any is written. A refusal partway
+        through would leave some nodes moved and others not, which is the
+        half-applied graph the link guards refuse to create."""
+        app = cardgen.load_app_config(ROOT / "config" / "app.json")
+        profile = cardgen.load_profile(app, "wai-hires")
+        workflow = cardgen.load_json(profile["workflow_path"])
+        # 840 is a legal --width, but 840 * 1.5 = 1260 is off the 8 grid.
+        with self.assertRaises(cardgen.CardGenError):
+            cardgen.apply_resolution(workflow, 840, 1224, profile["bindings"])
+        self.assertEqual(workflow["5"]["inputs"]["width"], 1024)
+        self.assertEqual(workflow["23"]["inputs"]["width"], 1536)
 
     def test_a_resolution_node_naming_a_link_is_refused(self) -> None:
         """resolution_nodes is the one binding that never reaches bound_node.
