@@ -306,6 +306,8 @@ uv run python cardgen.py --profile wai-single generate `
 
 [licenses/README.md](licenses/README.md) に、使用モデルの出典、レビュー状態、商用生成物の可否、ローカルハッシュ照合結果をまとめています。
 
+Qwen-Image-Edit系AIOの採用判断は [licenses/assessments/qwen-image-edit-aio.md](licenses/assessments/qwen-image-edit-aio.md) にあります。配布ページのライセンス表示だけでなく、マージされた全構成物の許諾チェーンを確認してください。
+
 ```powershell
 uv run python -m licenses sync
 uv run python -m licenses verify --require-approved --require-local-files
