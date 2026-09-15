@@ -1,0 +1,60 @@
+{
+  "schema_version": 4,
+  "id": "wai-inpaint",
+  "display_name": "WAI Illustrious SDXL (Masked repair of an existing image)",
+  "workflow": "workflows/approved/wai_sdxl_inpaint_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "bindings": {
+    "positive_prompt": {
+      "node_id": "6",
+      "field": "text"
+    },
+    "negative_prompt": {
+      "node_id": "7",
+      "field": "text"
+    },
+    "seed": {
+      "node_id": "12",
+      "field": "seed"
+    },
+    "input_image": {
+      "node_id": "30",
+      "field": "image"
+    },
+    "mask_image": {
+      "node_id": "31",
+      "field": "image"
+    },
+    "denoise": {
+      "node_id": "12",
+      "field": "denoise"
+    }
+  },
+  "approved_models": {
+    "checkpoints": [
+      "waiIllustriousSDXL_v170.safetensors"
+    ],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "bad quality, worst quality, worst detail, sketch, censor, low quality, lowres, blurry, jpeg artifacts, readable text, letters, logo, watermark, signature, photorealistic, 3d render"
+  },
+  "_notes": [
+    "マスクした範囲だけを描き直す。**マスクの外の画素はそのまま残る。**",
+    "--input-image は直したい画像そのもの、--mask-image は同じ寸法の白黒画像。",
+    "**白が描き直す側、黒が残す側。** LoadImageMask は red チャンネルを読む。",
+    "拡大の段を持たないので、出力の寸法は入力と同じ。印刷解像度へ上げるのは",
+    "wai-refine の仕事で、この道具の後段に置く。",
+    "denoise 既定 0.8。マスクの中を構造から描き直すための値で、下げると元の形が残る。",
+    "**既定の negative に被写体の語を入れていない。** この道具はマスクで異形（多腕・",
+    "多面）を直す用途を想定しており、duplicate person / extra arms / deformed anatomy",
+    "のような語は作りたいものと戦う。被写体に関する語は呼ぶ側が渡すこと。"
+  ]
+}

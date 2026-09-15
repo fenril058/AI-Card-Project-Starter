@@ -203,6 +203,9 @@ class CardGenTests(unittest.TestCase):
             "wai-single": (None, ["5"], every_sampler_field(["10"])),
             "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
             "wai-refine": ("12", None, every_sampler_field(["12"])),
+            # Same single-sampler shape as wai-refine. The mask rides on
+            # bindings.mask_image, which this matrix does not cover.
+            "wai-inpaint": ("12", None, every_sampler_field(["12"])),
             # FLUX.2 keeps each setting in its own node, so the profile binds
             # them one by one. Nothing carries a scheduler name. The resolution
             # is stated twice and both statements have to move together.
@@ -525,6 +528,7 @@ class CardGenTests(unittest.TestCase):
             negative=None,
             checkpoint=None,
             input_image=None,
+            mask_image=None,
             count=1,
             seed=1000,
             timeout=5,

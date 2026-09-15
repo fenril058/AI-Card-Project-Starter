@@ -54,6 +54,7 @@ BINDING_KEYS = frozenset(
         "negative_prompt",
         "seed",
         "input_image",
+        "mask_image",
         "denoise",
         "resolution_nodes",
         *SAMPLER_OVERRIDE_FIELDS,
@@ -130,12 +131,14 @@ def resolve_project_path(raw_path: str | Path) -> Path:
     return path
 
 
-def resolve_external_input_path(raw_path: str | Path) -> Path:
+def resolve_external_input_path(
+    raw_path: str | Path, option: str = "--input-image"
+) -> Path:
     """Resolve one explicitly supplied local input without taking ownership of it."""
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
         raise CardGenError(
-            "--input-imageは入力を所有するプロジェクト内の絶対パスで指定してください。"
+            f"{option}は入力を所有するプロジェクト内の絶対パスで指定してください。"
         )
     path = path.resolve()
     if not path.is_file():
@@ -816,6 +819,15 @@ def set_bound_input_image(
     return node_id
 
 
+def set_bound_mask_image(
+    workflow: dict[str, Any], bindings: dict[str, Any], uploaded_name: str
+) -> str:
+    if not isinstance(bindings.get("mask_image"), dict):
+        raise CardGenError("このプロファイルはマスク画像に対応していません。")
+    node_id, _ = set_bound_value(workflow, bindings, "mask_image", uploaded_name)
+    return node_id
+
+
 def detect_negative_mode(
     negative_nodes: list[str], zeroed_negative_nodes: list[str]
 ) -> str:
@@ -1262,6 +1274,7 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         )
 
     input_image_node: str | None = None
+    mask_image_node: str | None = None
     denoise_node: str | None = None
     sampler_param_nodes: dict[str, list[str]] = {}
     resolution_nodes: list[str] = []
@@ -1292,6 +1305,12 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
             input_image_node = set_bound_input_image(
                 probe, bindings, "validation-input.png"
             )
+        if "mask_image" in bindings:
+            # Same reason as input_image: resolve against a placeholder so a
+            # stale node_id fails before anything is uploaded or queued.
+            mask_image_node = set_bound_mask_image(
+                probe, bindings, "validation-mask.png"
+            )
     else:
         primary_id, primary_sampler = get_primary_sampler(probe)
         seed_field = set_sampler_seed(primary_sampler, 1)
@@ -1308,6 +1327,8 @@ def validate_profile_workflow(profile: dict[str, Any]) -> dict[str, Any]:
         "seed_field": seed_field,
         "input_image_required": input_image_node is not None,
         "input_image_node": input_image_node,
+        "mask_image_required": mask_image_node is not None,
+        "mask_image_node": mask_image_node,
         "denoise_node": denoise_node,
         # Same name and same shape as setting_overrides.sampler_nodes in the
         # run metadata, so the two records can be read side by side.
@@ -1601,9 +1622,17 @@ def command_generate(
             set_bound_input_image(workflow, bindings, uploaded_name)
         elif "input_image" in bindings:
             raise CardGenError("このプロファイルでは--input-imageが必要です。")
+        if args.mask_image is not None:
+            mask_path = resolve_external_input_path(args.mask_image, "--mask-image")
+            uploaded_mask = upload_input_image(app, mask_path)
+            set_bound_mask_image(workflow, bindings, uploaded_mask)
+        elif "mask_image" in bindings:
+            raise CardGenError("このプロファイルでは--mask-imageが必要です。")
     else:
         if args.input_image is not None:
             raise CardGenError("このプロファイルは--input-imageに対応していません。")
+        if args.mask_image is not None:
+            raise CardGenError("このプロファイルは--mask-imageに対応していません。")
         primary_id, primary_sampler = get_primary_sampler(workflow)
         set_sampler_seed(primary_sampler, 1)  # Validate before entering the loop.
 
@@ -1718,6 +1747,10 @@ def command_generate(
         "input_image_sha256": (
             sha256_file(Path(args.input_image)) if args.input_image else None
         ),
+        "mask_image_supplied": args.mask_image is not None,
+        "mask_image_sha256": (
+            sha256_file(Path(args.mask_image)) if args.mask_image else None
+        ),
         "results": results,
     }
     metadata_path = output_dir / f"{profile['id']}_{session_stamp}_metadata.json"
@@ -1782,6 +1815,11 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--input-image",
         help="参照・編集入力画像（所有元プロジェクト内の絶対パス）",
+    )
+    generate.add_argument(
+        "--mask-image",
+        help="マスク画像（同上）。白が描き直す側、黒が残す側。"
+        "bindings.mask_image を持つプロファイルでは必須",
     )
     generate.add_argument("--count", type=int, default=1, choices=range(1, 9))
     generate.add_argument("--seed", type=int)

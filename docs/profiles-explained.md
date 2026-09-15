@@ -39,14 +39,15 @@
 書き込む先が無いオプションは、黙って無視されるのではなくエラーになります。
 例外は `--seed` で、seed を持たないプロファイルでは無視されます。
 
-`--denoise` を受け付けるのは `wai-hires`、`wai-hires-latent`、`wai-refine` の3つで、いずれも指しているのは2パス目です。
+`--denoise` を受け付けるのは `wai-hires`、`wai-hires-latent`、`wai-refine`、`wai-inpaint` の4つです。
+前3つが指しているのは2パス目で、`wai-inpaint` は1つしかないsamplerを指します。
 1パス目は 1.0 のままでなければ空のlatentに対する img2img になってしまうため、両方のパスへ同じ値を書く作りにはなっていません。
 
 `flux2-klein-edit` は steps、cfg、sampler をそれぞれ別のノード（`Flux2Scheduler`、`CFGGuider`、`KSamplerSelect`）に持ち、samplerノード自身は接続だけを持ちます。
 そのためプロファイルが3つを個別に binding していて、`--steps` などはその1ノードへ落ちます。
 scheduler 名を持つノードが無いので、`--scheduler` だけはエラーになります。
 
-`wai-refine` と `esrgan-upscale` は空Latentを持たないので、`--width` と `--height` はエラーになります。
+`wai-refine`、`wai-inpaint`、`esrgan-upscale` は空Latentを持たないので、`--width` と `--height` はエラーになります。
 
 `flux2-klein-edit` は解像度を2箇所（`EmptyFlux2LatentImage` と `Flux2Scheduler`）に持つので、プロファイルが両方を列挙していて同時に動きます。
 片方だけ動かすと絵が変わります。同じ seed、同じプロンプト、同じ入力で 832×1216 を2本撮り、`Flux2Scheduler` を 1024×1344 のままにした側と揃えた側を比べたところ、画素の91%が違い、平均差は 4.9/255 でした（1組の比較）。
@@ -161,6 +162,31 @@ ComfyUI が出力ファイル名の接頭辞を画像へ埋め込み、その接
 
 「キャラクターは維持して、舞台だけ置き換える」のような指示に向きます。
 denoise ではなく指示文で変化量を決めるため、書きかたで結果が大きく変わります。
+
+### `wai-inpaint`（マスクした範囲だけを描き直す）
+
+| | |
+|---|---|
+| モデル | WAI Illustrious SDXL v1.7 |
+| 入力 | 直したい画像（`--input-image`）と、同じ寸法の白黒画像（`--mask-image`） |
+| 流れ | 画像をVAEで潜在へ移す → マスクを `SetLatentNoiseMask` で掛ける → denoise ぶんだけ描き直す |
+| 設定 | steps 20 / cfg 6.0 / euler_ancestral / denoise 既定 0.8 |
+
+**白が描き直す側、黒が残す側です。** `LoadImageMask` は red チャンネルを読みます。
+
+**マスクの外の画素はそのまま残ります。** ここが `flux2-klein-edit` との違いです。
+あちらは空のlatentから描き始め、元絵は `ReferenceLatent` として条件付けに入るだけなので、
+出力の画素は全部あたらしくなります。**元絵の形を実際に残したいときはこちらを使ってください。**
+
+拡大の段を持たないので、**出力の寸法は入力と同じ**です。印刷解像度へ上げるのは
+`wai-refine` の仕事なので、その前に置きます。
+
+denoise 既定 0.8 はマスクの中を構造から描き直すための値です。下げると元の形が残ります。
+**この既定値は実測ではなく、インペイントの一般的な出発点として置いたものです。**
+
+**既定の negative に被写体の語を入れていません。** この道具はマスクで異形（多腕・多面）を
+直す用途を想定していて、`duplicate person` や `extra arms` のような語は作りたいものと
+戦います。被写体に関する語は呼ぶ側が渡してください。
 
 ### `esrgan-upscale`（拡大だけを行う）
 
