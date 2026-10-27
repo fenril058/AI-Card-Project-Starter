@@ -202,6 +202,8 @@ class CardGenTests(unittest.TestCase):
             "wai-hires-latent": ("12", ["5"], every_sampler_field(["10", "12"])),
             "wai-single": (None, ["5"], every_sampler_field(["10"])),
             "zimage": (None, ["57:13"], every_sampler_field(["57:3"])),
+            "zimage-base": (None, ["7"], every_sampler_field(["8"])),
+            "lumina2": (None, ["5"], every_sampler_field(["3"])),
             "wai-refine": ("12", None, every_sampler_field(["12"])),
             # Same single-sampler shape as wai-refine. The mask rides on
             # bindings.mask_image, which this matrix does not cover.

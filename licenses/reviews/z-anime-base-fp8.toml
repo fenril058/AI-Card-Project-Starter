@@ -1,0 +1,18 @@
+status = "approved"
+reviewed_at = "2026-10-28"
+reviewed_by = "Codex (AI review of primary sources; user authorized local installation and test generation)"
+todo = []
+notes = [
+  "Scope: localhost generation and commercial use/sale of generated illustrations. No output attribution requirement found in the author's Apache-2.0 release.",
+  "Author model card: https://huggingface.co/SeeSee21/Z-Anime/blob/0f5fb51464638a2f7328a1d74590281e63e1fde2/README.md. Full fine-tune of Tongyi-MAI/Z-Image, with Base BF16/FP8 and distilled variants.",
+  "Author states no additional restrictions beyond Apache-2.0: https://huggingface.co/SeeSee21/Z-Anime/discussions/10.",
+  "Apache-2.0 section 4 requires license/notices and modification notices when redistributing the model or derivatives. This does not impose a model credit on ordinary generated card illustrations.",
+  "Uses existing approved qwen_3_4b.safetensors and ae.safetensors, whose separate ledger entries remain applicable. No alternative text encoder or LoRA is included in this approval.",
+]
+[permissions]
+generated_output_commercial_use = "allowed"
+generated_output_sale = "allowed"
+model_redistribution = "allowed_with_conditions"
+derivative_model_distribution = "allowed_with_conditions"
+hosted_inference_or_api = "allowed"
+attribution = "not_required"

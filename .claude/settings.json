@@ -48,9 +48,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run python .claude/hooks/validate_on_config_change.py",
+            "command": "uv run python .claude/hooks/verify_on_edit.py",
             "timeout": 120,
-            "statusMessage": "承認済み設定を検証中"
+            "statusMessage": "変更箇所の検査を実行中"
           }
         ]
       }

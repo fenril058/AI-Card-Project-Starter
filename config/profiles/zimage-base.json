@@ -1,0 +1,25 @@
+{
+  "schema_version": 4,
+  "id": "zimage-base",
+  "display_name": "Z-Image Base (Text CFG, Single Pass)",
+  "workflow": "workflows/approved/z_image_base_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "approved_models": {
+    "checkpoints": [],
+    "unet": ["z-anime-base-fp8.safetensors"],
+    "clip": ["qwen_3_4b.safetensors"],
+    "vae": ["ae.safetensors"],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "low quality, blurry, text, logo, watermark, border"
+  },
+  "_notes": [
+    "Separate from zimage because Base uses both positive and negative text conditioning with CFG above 1; the Turbo pipeline zeros negative conditioning.",
+    "Z-Anime Base FP8: 28 steps / CFG 4 / euler_ancestral / beta, as recommended by the author. Reuses the approved standard Qwen3-4B encoder and ae.safetensors VAE."
+  ]
+}

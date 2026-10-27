@@ -10,7 +10,8 @@
 - `--steps` などで上書きした実行では、実際に流れた値が `outputs/*_metadata.json` に残ります。**説明より記録が正です。**
 
 `_notes` は「なぜこの値なのか」を書き残すための人間向けの欄で、`cardgen.py` は読みません。
-8つのプロファイルのうち4つにあります（`esrgan-upscale`、`wai-controlnet`、`wai-hires-latent`、`wai-refine`）。
+`_notes` があるプロファイルでは、設定の理由や適用範囲も確認できます。
+`lumina2` と `zimage-base` の値は2026-10-28に追加した設定です。
 以下で観察を引くときは、どのプロファイルの `_notes` かを示します。
 
 ## パラメータの意味
@@ -133,6 +134,31 @@ ComfyUI が出力ファイル名の接頭辞を画像へ埋め込み、その接
 
 **negative は効きません。**
 ワークフローが `ConditioningZeroOut` で無効化するため、`--negative` に何を書いても結果に反映されません（`negative_prompt_mode: "zeroed"`）。
+
+### `zimage-base`（正負の文章でZ-Image Base系を生成する）
+
+| | |
+|---|---|
+| モデル | Z-Anime Base FP8、標準Qwen3-4B、ae VAE |
+| 流れ | 832×1216で生成して終わり |
+| 設定 | steps 28 / cfg 4 / euler_ancestral / beta / AuraFlow shift 3 |
+
+`zimage` のTurboとは条件付けが違い、**negativeの文章が効きます**。
+Baseの推奨範囲内で画質を確認するための1パス構成です。
+FP8は画像モデルの精度形式で、テキストエンコーダには既存の承認済みファイルを使います。
+
+### `lumina2`（Lumina Image 2.0系を1パスで生成する）
+
+| | |
+|---|---|
+| モデル | NetaYume v4 AIO（画像モデル・Gemma-2-2B・VAEを内包） |
+| 流れ | 832×1216で生成して終わり |
+| 設定 | steps 40 / cfg 5 / res_multistep / linear_quadratic / AuraFlow shift 6 |
+
+**negativeの文章が効きます**。作者配布ワークフローのcheckpoint接続とshiftを参考に、
+16チャンネルの `EmptySD3LatentImage` とbatch 1で構成しています。
+アニメ絵では、作者が案内するシステム指示を含めた例をREADMEに載せています。
+モデル内のGemmaには独自の利用規約が適用されるため、ライセンス台帳のレビューも参照してください。
 
 ## 入力画像が要るプロファイル
 

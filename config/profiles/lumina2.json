@@ -1,0 +1,26 @@
+{
+  "schema_version": 4,
+  "id": "lumina2",
+  "display_name": "Lumina Image 2.0 (Single Pass)",
+  "workflow": "workflows/approved/lumina2_single_api.json",
+  "capabilities": {
+    "negative_prompt_mode": "text",
+    "multi_pass": false
+  },
+  "approved_models": {
+    "checkpoints": ["NetaYume_v4_all_in_one.safetensors"],
+    "unet": [],
+    "clip": [],
+    "vae": [],
+    "loras": [],
+    "upscale_models": []
+  },
+  "defaults": {
+    "negative_prompt": "low quality, blurry, text, logo, watermark, border"
+  },
+  "_notes": [
+    "NetaYume v4 AIO includes the Lumina2 image model, Gemma-2-2B encoder and FLUX VAE. See licenses/reviews/netayume-v4-aio.toml for component terms.",
+    "Uses the author's checkpoint + ModelSamplingAuraFlow (shift 6) topology, with a 16-channel EmptySD3LatentImage, batch 1 and 832x1216 resolution.",
+    "40 steps / CFG 5 / res_multistep / linear_quadratic follow the author's recommended range. Include the anime system instruction in --prompt when appropriate."
+  ]
+}

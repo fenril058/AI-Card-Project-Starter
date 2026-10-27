@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.1.0",
+  "asset_id": "z-anime-base-fp8",
+  "asset_type": "diffusion_model",
+  "generated_at": "2026-10-27T15:15:19Z",
+  "identity": {
+    "name": "Z-Anime Base FP8",
+    "version_name": "v1.0"
+  },
+  "source": {
+    "provider": "huggingface",
+    "canonical_url": "https://huggingface.co/SeeSee21/Z-Anime/blob/0f5fb51464638a2f7328a1d74590281e63e1fde2/diffusion_models/z-anime-base-fp8.safetensors",
+    "api_url": "https://huggingface.co/api/models/SeeSee21/Z-Anime",
+    "provider_model_id": "SeeSee21/Z-Anime",
+    "provider_version_id": null,
+    "revision": "0f5fb51464638a2f7328a1d74590281e63e1fde2",
+    "retrieved_at": "2026-10-28T00:15:19+09:00"
+  },
+  "provenance": {
+    "base_model": null,
+    "notes": []
+  },
+  "file": {
+    "filename": "diffusion_models/z-anime-base-fp8.safetensors",
+    "download_url": "https://huggingface.co/SeeSee21/Z-Anime/resolve/0f5fb51464638a2f7328a1d74590281e63e1fde2/diffusion_models/z-anime-base-fp8.safetensors",
+    "provider_size_bytes": 6154966640,
+    "configured_path": "models/diffusion_models/z-anime-base-fp8.safetensors",
+    "exists": true,
+    "size_bytes": 6154966640,
+    "sha256": "3D2FAF5F7E223ECF4942B52B55D816B026AFDB7A447CB98CF7CD297240FFAD96",
+    "weights_sha256": null,
+    "provider_sha256": "3D2FAF5F7E223ECF4942B52B55D816B026AFDB7A447CB98CF7CD297240FFAD96",
+    "provider_weights_sha256": null,
+    "expected_sha256": "3D2FAF5F7E223ECF4942B52B55D816B026AFDB7A447CB98CF7CD297240FFAD96",
+    "verification": "exact_file_match"
+  },
+  "license": {
+    "declared": null,
+    "declared_url": "https://huggingface.co/SeeSee21/Z-Anime/blob/0f5fb51464638a2f7328a1d74590281e63e1fde2/README.md",
+    "notes": []
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_at": "2026-10-28",
+    "reviewed_by": "Codex (AI review of primary sources; user authorized local installation and test generation)",
+    "permissions": {
+      "generated_output_commercial_use": "allowed",
+      "generated_output_sale": "allowed",
+      "model_redistribution": "allowed_with_conditions",
+      "derivative_model_distribution": "allowed_with_conditions",
+      "hosted_inference_or_api": "allowed",
+      "attribution": "not_required"
+    },
+    "todo": [],
+    "notes": [
+      "Scope: localhost generation and commercial use/sale of generated illustrations. No output attribution requirement found in the author's Apache-2.0 release.",
+      "Author model card: https://huggingface.co/SeeSee21/Z-Anime/blob/0f5fb51464638a2f7328a1d74590281e63e1fde2/README.md. Full fine-tune of Tongyi-MAI/Z-Image, with Base BF16/FP8 and distilled variants.",
+      "Author states no additional restrictions beyond Apache-2.0: https://huggingface.co/SeeSee21/Z-Anime/discussions/10.",
+      "Apache-2.0 section 4 requires license/notices and modification notices when redistributing the model or derivatives. This does not impose a model credit on ordinary generated card illustrations.",
+      "Uses existing approved qwen_3_4b.safetensors and ae.safetensors, whose separate ledger entries remain applicable. No alternative text encoder or LoRA is included in this approval."
+    ]
+  },
+  "evidence": [],
+  "provider_metadata": {
+    "last_modified": "2026-04-27T01:13:30+00:00",
+    "private": false,
+    "gated": false,
+    "pipeline_tag": "text-to-image"
+  }
+}

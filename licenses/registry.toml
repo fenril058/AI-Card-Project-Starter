@@ -1,6 +1,37 @@
 schema_version = 1
 
 [[assets]]
+id = "z-anime-base-fp8"
+type = "diffusion_model"
+name = "Z-Anime Base FP8"
+version_name = "v1.0"
+local_path = "models/diffusion_models/z-anime-base-fp8.safetensors"
+license_url = "https://huggingface.co/SeeSee21/Z-Anime/blob/0f5fb51464638a2f7328a1d74590281e63e1fde2/README.md"
+[assets.source]
+provider = "huggingface"
+repo_id = "SeeSee21/Z-Anime"
+filename = "diffusion_models/z-anime-base-fp8.safetensors"
+revision = "0f5fb51464638a2f7328a1d74590281e63e1fde2"
+expected_sha256 = "3d2faf5f7e223ecf4942b52b55d816b026afdb7a447cb98cf7cd297240ffad96"
+
+[[assets]]
+id = "netayume-v4-aio"
+type = "checkpoint"
+name = "NetaYume Lumina v4 AIO"
+version_name = "v4"
+local_path = "models/checkpoints/NetaYume_v4_all_in_one.safetensors"
+license_url = "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/blob/69c29c441119d43405d8373c654b16827d3cf46e/README.md"
+provenance_notes = [
+  "The repository labels NetaYume Apache-2.0, but the AIO also contains Gemma-2-2B, which remains subject to Google's Gemma Terms of Use. Approval covers local image generation and commercial outputs; model/service redistribution requires component-level compliance.",
+]
+[assets.source]
+provider = "huggingface"
+repo_id = "duongve/NetaYume-Lumina-Image-2.0"
+filename = "NetaYume_v4_all_in_one.safetensors"
+revision = "69c29c441119d43405d8373c654b16827d3cf46e"
+expected_sha256 = "e2b277eedf4fe15e1c27fd101990053314725a6eb8ee370bd486d132c04455bf"
+
+[[assets]]
 id = "wai-illustrious-sdxl-v17"
 type = "checkpoint"
 name = "WAI-illustrious-SDXL"

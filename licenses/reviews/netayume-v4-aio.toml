@@ -1,0 +1,18 @@
+status = "approved"
+reviewed_at = "2026-10-28"
+reviewed_by = "Codex (AI review of primary sources; user authorized local installation and test generation)"
+todo = []
+notes = [
+  "Scope: localhost image generation and commercial use/sale of generated illustrations, with no output credit required. This is not blanket Apache-2.0-only approval of every bundled component.",
+  "Author repository declares Apache-2.0 and identifies Gemma-2-2B and the FLUX VAE as bundled components: https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/blob/69c29c441119d43405d8373c654b16827d3cf46e/README.md.",
+  "Upstream Neta Lumina is Apache-2.0: https://huggingface.co/neta-art/Neta-Lumina. FLUX VAE is distinct from the FLUX.1-dev diffusion model's weights; the project already reviews ae.safetensors separately.",
+  "Gemma-2-2B remains subject to https://ai.google.dev/gemma/terms and its incorporated prohibited-use policy. Section 3.3 says Google claims no rights in outputs; section 1.1 excludes outputs from Model Derivatives. No output attribution requirement was found.",
+  "Apache-2.0 license/notices requirements apply to model redistribution. Gemma redistribution, including hosted services, has additional agreement, notice and use-policy requirements. Any such distribution needs a separate component-level check and is outside the current local-only installation task.",
+]
+[permissions]
+generated_output_commercial_use = "allowed"
+generated_output_sale = "allowed"
+model_redistribution = "allowed_with_conditions"
+derivative_model_distribution = "allowed_with_conditions"
+hosted_inference_or_api = "allowed_with_conditions"
+attribution = "not_required"

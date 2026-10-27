@@ -71,7 +71,7 @@ uv run python cardgen.py profiles
 
 出力の `*` が既定プロファイルで、`config/app.json` の `default_profile` で切り替えます。
 
-現在のプロファイルは次の7種類です。
+現在のプロファイルは次の11種類です。
 
 | ID | 用途 | 入力画像 |
 |---|---|---|
@@ -80,8 +80,12 @@ uv run python cardgen.py profiles
 | `wai-single` | WAI Illustrious SDXL、Single Pass | 不要 |
 | `wai-controlnet` | Scribble ControlNet + Hires Fix | ラフ線画 |
 | `wai-refine` | 既存画像のアップスケール + ディテール調整 | 仕上げたい画像 |
+| `wai-inpaint` | マスクした範囲だけを描き直す。拡大の段は持たない | 直したい画像 + 同寸のマスク |
 | `zimage` | Z-Image-Turbo | 不要 |
+| `zimage-base` | Z-Image Base系（Z-Anime Base FP8）、ネガティブ文章を適用 | 不要 |
+| `lumina2` | Lumina Image 2.0系（NetaYume v4 AIO） | 不要 |
 | `flux2-klein-edit` | FLUX.2 Klein Baseによる参照編集 | 編集元画像 |
+| `esrgan-upscale` | Real-ESRGANで4倍に拡大するだけ。サンプラーを持たない | 拡大したい画像 |
 
 プロファイルはモデル単体ではなく、1種類の生成パイプラインを表します。
 
@@ -102,14 +106,14 @@ uv run python cardgen.py validate --all
 
 - ワークフローがAPI形式で読み込めること
 - プロンプト・seedのbindingが実在するノードと入力を指していること
-- 入力画像・denoiseのbindingを持つプロファイルでは、それらも解決できること
+- 入力画像・マスク画像・denoiseのbindingを持つプロファイルでは、それらも解決できること
 - Sampler数とプロファイルの `multi_pass` 指定が一致すること
-- negative方式（`text` / `zeroed`）がプロファイルの宣言と一致すること
+- negative方式（`text` / `zeroed` / `mixed`）がプロファイルの宣言と一致すること
 - ワークフローが参照するモデルが `approved_models` に含まれること
 
-入力画像のbindingはアップロード後に解決されるため、`validate` ではプレースホルダ名で解決だけを試します。node_idやフィールド名が古くなっていれば、生成を始める前に失敗します。
+入力画像とマスク画像のbindingはアップロード後に解決されるため、`validate` ではプレースホルダ名で解決だけを試します。node_idやフィールド名が古くなっていれば、生成を始める前に失敗します。
 
-Claude Codeが `config/` または `workflows/approved/` のJSONを編集した場合は、PostToolUseフック（[.claude/hooks/validate_on_config_change.py](.claude/hooks/validate_on_config_change.py)）が `validate --all` を自動実行します。失敗するとその場でエラーが差し戻されます。手で編集したときは自分で `validate` を実行してください。
+Claude Codeがファイルを編集すると、PostToolUseフック（[.claude/hooks/verify_on_edit.py](.claude/hooks/verify_on_edit.py)）が編集先に応じた検査を自動実行します。`config/` または `workflows/approved/` のJSONなら `validate --all`、`cardgen.py` または `tests/` のPythonなら `pytest` です。失敗するとその場でエラーが差し戻されます。エディタやシェルで手を入れたときはフックが走らないため、自分で該当する検査を実行してください。
 
 ## 生成例
 
@@ -192,6 +196,35 @@ uv run python cardgen.py --profile wai-refine generate `
   --denoise 0.25
 ```
 
+### マスクした範囲だけを描き直す
+
+```powershell
+uv run python cardgen.py --profile wai-inpaint generate `
+  --prompt "Repair the masked area, matching the surrounding art" `
+  --input-image "C:\path\to\private-project\art\source.png" `
+  --mask-image "C:\path\to\private-project\art\source-mask.png" `
+  --count 1
+```
+
+マスクは入力画像と同じ寸法の白黒画像で、**白が描き直す側、黒が残す側**です（`LoadImageMask` はredチャンネルを読みます）。マスクの外の画素はそのまま残ります。
+
+既定の `denoise` は0.8です。マスクの中を構造から描き直すための値で、下げると元の形が残ります。
+
+拡大の段を持たないため、出力の寸法は入力と同じです。印刷解像度へ上げるのは `wai-refine` の仕事で、この工程の後段に置きます。
+
+このプロファイルの既定negativeには被写体の語（`extra arms`、`deformed anatomy` など）を入れていません。多腕や多面をマスクで直す用途では、それらの語が作りたいものと戦うためです。被写体に関する語は `--negative` で渡しますが、`--negative` は既定値へ追加するのではなく置き換えるため、残したい品質語ごと書き直してください。
+
+### 拡大だけを行う
+
+```powershell
+uv run python cardgen.py --profile esrgan-upscale generate `
+  --input-image "C:\path\to\private-project\art\source.png"
+```
+
+サンプラーを通さないため、`--prompt`、`--negative`、`--seed` は書き込む先が無く、渡しても出力は変わりません。seedのbindingを持たないので `--count` は1だけです（同じ入力からは常に同じ出力が出ます）。
+
+出力の寸法はモデルの倍率（x4）まかせです。カード比率へのクロップはこの工程に含めず、後工程で行います。
+
 ### Z-Image-Turbo
 
 ```powershell
@@ -201,6 +234,24 @@ uv run python cardgen.py --profile zimage generate `
 ```
 
 標準Z-Imageワークフローのnegative経路は `ConditioningZeroOut` です。独立したネガティブ文章は適用されないため、除外条件はポジティブプロンプトへ自然文で含めます。
+
+### Z-Anime Base / NetaYume Lumina
+
+両方とも1パス・832×1216・1枚ずつを既定とし、独立したnegative文章が効きます。
+`zimage-base` はZ-Anime Base FP8（28 steps / CFG 4 / Euler ancestral / beta）、
+`lumina2` はNetaYume v4 AIO（40 steps / CFG 5 / res_multistep / linear_quadratic）です。
+Z-AnimeのBaseは、negativeを無効化する既存の `zimage`（Turbo）とは別の経路です。
+
+```powershell
+uv run python cardgen.py --profile zimage-base generate --prompt "An original adult knight in silver armor, standing in ancient ruins at sunset, detailed anime illustration" --negative "text, logo, watermark, border, low quality" --count 1
+
+uv run python cardgen.py --profile lumina2 generate --prompt "You are an assistant designed to generate anime images based on textual prompts. <Prompt Start> An original adult knight in silver armor, standing in ancient ruins at sunset, detailed anime illustration" --negative "text, logo, watermark, border, low quality" --count 1
+```
+
+モデルの固定revisionと配布元ハッシュは `licenses/registry.toml` に記録しています。
+NetaYume AIOに含まれるGemmaの利用規約も適用されるため、パイプライン全体を
+Apache-2.0だけで扱わないでください。生成画像の商用利用・販売と、モデル再配布・
+生成サービス提供の条件は `licenses/reviews/` に分けて記録しています。
 
 ### FLUX.2 Klein参照編集
 
@@ -241,7 +292,7 @@ uv run python cardgen.py --profile wai-single generate `
 
 `--count` は1回の実行につき1〜8枚です。`--timeout` を指定すると `config/app.json` の `generation_timeout_seconds`（既定900秒）を上書きします。
 
-`--denoise` は常に1ノードにだけ適用されます。`--steps` や `--cfg` を該当入力を持つ全Samplerへ一括適用するのと同じことを denoise でやると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine` です。
+`--denoise` は常に1ノードにだけ適用されます。`--steps` や `--cfg` を該当入力を持つ全Samplerへ一括適用するのと同じことを denoise でやると base pass まで巻き込みます。空のlatentに対する base pass を1.0未満で回すと絵になりません。そのため `--denoise` はプロファイルの `bindings.denoise` が指す1ノードにだけ適用され、bindingを持たないプロファイルではエラーになります。現在対応しているのは `wai-hires`、`wai-hires-latent`、`wai-refine`、`wai-inpaint` です。
 
 `--steps`、`--cfg`、`--sampler`、`--scheduler` も、プロファイルが同名の binding（`bindings.steps` など）を持つ場合はその1ノードだけに書き込みます。設定をsamplerノードの外に持つグラフのための逃げ道で、`flux2-klein-edit` が steps を `Flux2Scheduler`、cfg を `CFGGuider`、sampler_name を `KSamplerSelect` へ指名しています。どのオプションがどのプロファイルでどこへ落ちるかは [docs/profiles-explained.md](docs/profiles-explained.md#既定値と上書き) にあります。
 
@@ -335,7 +386,7 @@ uv run python -m pytest
 - `workflows/approved/` のAPI形式ワークフローだけを使う
 - 選択プロファイルの `approved_models` に含まれるモデルだけを使う
 - モデル、LoRA、Custom Node、ワークフローを明示承認なく追加・更新・削除しない
-- 入力画像と生成物を公開リポジトリへ追加しない
+- 入力画像・マスク画像と生成物を公開リポジトリへ追加しない
 - カード固有情報と印刷用文字組みは後工程で扱う
 
 詳細な運用規則は [AGENTS.md](AGENTS.md) を参照してください。

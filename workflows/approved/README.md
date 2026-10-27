@@ -15,6 +15,8 @@ ComfyUIで生成成功したワークフローを **API形式** で書き出し�
 | `wai_sdxl_controlnet_hires_api.json` | `wai-controlnet` | Scribble ControlNetをbase passへ適用し、Hires passで仕上げ |
 | `wai_sdxl_refine_api.json` | `wai-refine` | 既存画像のアップスケール + ディテール調整 |
 | `z_image_turbo_api.json` | `zimage` | Z-Image-Turbo。negativeは `ConditioningZeroOut` |
+| `z_image_base_api.json` | `zimage-base` | Z-Image Base系。Z-Anime Base FP8、正負両方の文章でCFGを適用 |
+| `lumina2_single_api.json` | `lumina2` | Lumina Image 2.0系。NetaYume v4 AIO、1パス生成 |
 | `flux2_klein_4b_edit_api.json` | `flux2-klein-edit` | FLUX.2 Klein Baseによる参照編集 |
 | `esrgan_upscale_api.json` | `esrgan-upscale` | Real-ESRGANで4倍にするだけ。**Samplerを持たない** |
 

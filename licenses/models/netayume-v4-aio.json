@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.1.0",
+  "asset_id": "netayume-v4-aio",
+  "asset_type": "checkpoint",
+  "generated_at": "2026-10-27T15:16:09Z",
+  "identity": {
+    "name": "NetaYume Lumina v4 AIO",
+    "version_name": "v4"
+  },
+  "source": {
+    "provider": "huggingface",
+    "canonical_url": "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/blob/69c29c441119d43405d8373c654b16827d3cf46e/NetaYume_v4_all_in_one.safetensors",
+    "api_url": "https://huggingface.co/api/models/duongve/NetaYume-Lumina-Image-2.0",
+    "provider_model_id": "duongve/NetaYume-Lumina-Image-2.0",
+    "provider_version_id": null,
+    "revision": "69c29c441119d43405d8373c654b16827d3cf46e",
+    "retrieved_at": "2026-10-28T00:16:09+09:00"
+  },
+  "provenance": {
+    "base_model": null,
+    "notes": [
+      "The repository labels NetaYume Apache-2.0, but the AIO also contains Gemma-2-2B, which remains subject to Google's Gemma Terms of Use. Approval covers local image generation and commercial outputs; model/service redistribution requires component-level compliance."
+    ]
+  },
+  "file": {
+    "filename": "NetaYume_v4_all_in_one.safetensors",
+    "download_url": "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/resolve/69c29c441119d43405d8373c654b16827d3cf46e/NetaYume_v4_all_in_one.safetensors",
+    "provider_size_bytes": 10620229821,
+    "configured_path": "models/checkpoints/NetaYume_v4_all_in_one.safetensors",
+    "exists": true,
+    "size_bytes": 10620229821,
+    "sha256": "E2B277EEDF4FE15E1C27FD101990053314725A6EB8EE370BD486D132C04455BF",
+    "weights_sha256": null,
+    "provider_sha256": "E2B277EEDF4FE15E1C27FD101990053314725A6EB8EE370BD486D132C04455BF",
+    "provider_weights_sha256": null,
+    "expected_sha256": "E2B277EEDF4FE15E1C27FD101990053314725A6EB8EE370BD486D132C04455BF",
+    "verification": "exact_file_match"
+  },
+  "license": {
+    "declared": null,
+    "declared_url": "https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/blob/69c29c441119d43405d8373c654b16827d3cf46e/README.md",
+    "notes": []
+  },
+  "review": {
+    "status": "approved",
+    "reviewed_at": "2026-10-28",
+    "reviewed_by": "Codex (AI review of primary sources; user authorized local installation and test generation)",
+    "permissions": {
+      "generated_output_commercial_use": "allowed",
+      "generated_output_sale": "allowed",
+      "model_redistribution": "allowed_with_conditions",
+      "derivative_model_distribution": "allowed_with_conditions",
+      "hosted_inference_or_api": "allowed_with_conditions",
+      "attribution": "not_required"
+    },
+    "todo": [],
+    "notes": [
+      "Scope: localhost image generation and commercial use/sale of generated illustrations, with no output credit required. This is not blanket Apache-2.0-only approval of every bundled component.",
+      "Author repository declares Apache-2.0 and identifies Gemma-2-2B and the FLUX VAE as bundled components: https://huggingface.co/duongve/NetaYume-Lumina-Image-2.0/blob/69c29c441119d43405d8373c654b16827d3cf46e/README.md.",
+      "Upstream Neta Lumina is Apache-2.0: https://huggingface.co/neta-art/Neta-Lumina. FLUX VAE is distinct from the FLUX.1-dev diffusion model's weights; the project already reviews ae.safetensors separately.",
+      "Gemma-2-2B remains subject to https://ai.google.dev/gemma/terms and its incorporated prohibited-use policy. Section 3.3 says Google claims no rights in outputs; section 1.1 excludes outputs from Model Derivatives. No output attribution requirement was found.",
+      "Apache-2.0 license/notices requirements apply to model redistribution. Gemma redistribution, including hosted services, has additional agreement, notice and use-policy requirements. Any such distribution needs a separate component-level check and is outside the current local-only installation task."
+    ]
+  },
+  "evidence": [],
+  "provider_metadata": {
+    "last_modified": "2025-12-09T07:24:20+00:00",
+    "private": false,
+    "gated": false,
+    "pipeline_tag": "text-to-image"
+  }
+}

@@ -2,19 +2,19 @@
   "schema_version": "1.1.0",
   "asset_id": "z-image-ae",
   "asset_type": "vae",
-  "generated_at": "2026-08-06T15:28:19Z",
+  "generated_at": "2026-10-27T15:15:26Z",
   "identity": {
     "name": "Z-Image AE",
     "version_name": "main"
   },
   "source": {
     "provider": "huggingface",
-    "canonical_url": "https://huggingface.co/Comfy-Org/z_image_turbo/blob/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/vae/ae.safetensors",
+    "canonical_url": "https://huggingface.co/Comfy-Org/z_image_turbo/blob/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/vae/ae.safetensors",
     "api_url": "https://huggingface.co/api/models/Comfy-Org/z_image_turbo",
     "provider_model_id": "Comfy-Org/z_image_turbo",
     "provider_version_id": null,
-    "revision": "d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e",
-    "retrieved_at": "2026-08-07T00:28:19+09:00"
+    "revision": "6fc90a3b1b653e935a0d175e260736de25b84df5",
+    "retrieved_at": "2026-10-28T00:15:26+09:00"
   },
   "provenance": {
     "base_model": null,
@@ -22,7 +22,7 @@
   },
   "file": {
     "filename": "split_files/vae/ae.safetensors",
-    "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/d24c4cf2a0cd98a42f23467e27e3d76ee9438b8e/split_files/vae/ae.safetensors",
+    "download_url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/6fc90a3b1b653e935a0d175e260736de25b84df5/split_files/vae/ae.safetensors",
     "provider_size_bytes": 335304388,
     "configured_path": "models/vae/ae.safetensors",
     "exists": true,
@@ -63,7 +63,7 @@
   },
   "evidence": [],
   "provider_metadata": {
-    "last_modified": "2026-07-02T13:20:16+00:00",
+    "last_modified": "2026-09-23T08:02:57+00:00",
     "private": false,
     "gated": false,
     "pipeline_tag": null
