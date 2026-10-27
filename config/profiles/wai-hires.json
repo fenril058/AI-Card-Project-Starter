@@ -8,10 +8,32 @@
     "multi_pass": true
   },
   "bindings": {
-    "positive_prompt": { "node_id": "6", "field": "text" },
-    "negative_prompt": { "node_id": "7", "field": "text" },
-    "seed": { "node_id": "10", "field": "seed" },
-    "denoise": { "node_id": "12", "field": "denoise" }
+    "positive_prompt": {
+      "node_id": "6",
+      "field": "text"
+    },
+    "negative_prompt": {
+      "node_id": "7",
+      "field": "text"
+    },
+    "seed": {
+      "node_id": "10",
+      "field": "seed"
+    },
+    "denoise": {
+      "node_id": "12",
+      "field": "denoise"
+    },
+    "resolution_nodes": [
+      {
+        "node_id": "5",
+        "scale": 1
+      },
+      {
+        "node_id": "23",
+        "scale": 1.5
+      }
+    ]
   },
   "approved_models": {
     "checkpoints": [
@@ -27,5 +49,8 @@
   },
   "defaults": {
     "negative_prompt": "text, logo, watermark, low quality, malformed hands"
-  }
+  },
+  "_notes": [
+    "node 5 が base pass の解像度。node 23 はそれを1.5倍した Hires 後の出力寸法で、保存される画像のサイズを決めるのはこちら。--width は node 5 を指し、node 23 が追従する。"
+  ]
 }
