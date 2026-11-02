@@ -382,6 +382,8 @@ uv run python -m licenses report
 uv run python -m pytest
 ```
 
+同じ検査は、mainへのpushとPull Requestで [GitHub Actions](.github/workflows/ci.yml) も実行します。`uv sync --locked`、`pytest`、`validate --all` の3段です。ComfyUIへの接続とモデル本体を必要としない範囲だけを対象にするため、`check` と `generate` はCIに含めません。Dependabotの更新PRもこれで検証されます。
+
 ## 安全上の境界
 
 - ComfyUIはlocalhost以外へ公開しない
