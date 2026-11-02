@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # ci.ymlはActionをcommit SHAで固定している。固定したまま古くならないよう、
+  # 更新はDependabotに追従させる。pip側のセキュリティ更新はリポジトリ設定の機能で、
+  # ここには書かない。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
