@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # AGENTS.mdとREADMEが前提にしているPowerShell環境に合わせる
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      # --locked は、pyproject.tomlとuv.lockが食い違うPRをここで落とす
+      - name: 依存関係をlockfileどおりに入れる
+        run: uv sync --locked
+
+      - name: pytest
+        run: uv run --no-sync python -m pytest -q
+
+      # CARDGEN_COMFYUI_MODELS_DIRを渡さないので、validateはモデルファイルの実在確認を省く。
+      # ComfyUIへの接続とモデル本体を要する check と generate はCIで扱わない。
+      - name: validate --all
+        run: uv run --no-sync python cardgen.py validate --all
